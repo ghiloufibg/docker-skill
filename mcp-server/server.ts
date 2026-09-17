@@ -18,6 +18,15 @@ import { listContainers } from "./docker/tools/ps.js";
 import { inspectContainer } from "./docker/tools/inspect.js";
 import { getContainerLogs } from "./docker/tools/logs.js";
 import { getContainerStats } from "./docker/tools/stats.js";
+import {
+  startContainer,
+  restartContainer,
+  pauseContainer,
+  unpauseContainer,
+  stopContainer,
+  killContainer,
+  removeContainer,
+} from "./docker/tools/actions.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -200,6 +209,11 @@ const InvestigationReportSchema = z.object({
     ),
 });
 
+const ActionResultSchema = z.object({
+  id: z.string(),
+  state: z.string(),
+});
+
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "docker-skill Stage-0 spike: local system card",
@@ -224,6 +238,7 @@ export function createServer(): McpServer {
         "git status of the current repo). No Docker, no network calls — this " +
         "is the Stage-0 MCP-UI plumbing spike from docs/design/mcp-ui-docker-ops.md, " +
         "not the Docker dashboard itself.",
+      annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: z.object({}),
       outputSchema: z.object({
         system: SystemInfoSchema,
@@ -262,6 +277,7 @@ export function createServer(): McpServer {
     {
       title: "Refresh disk/memory/uptime",
       description: "Re-samples disk usage, free memory, and uptime. App-only.",
+      annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: z.object({}),
       outputSchema: PollStatsSchema,
       _meta: { ui: { visibility: ["app"] } },
@@ -292,6 +308,7 @@ export function createServer(): McpServer {
       description:
         "Lists all local Docker containers (running and stopped) with name, " +
         "image, state, and compose project. Read-only, local socket only.",
+      annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: z.object({}),
       outputSchema: z.object({ containers: z.array(ContainerSummarySchema) }),
       _meta: { ui: { resourceUri: dashboardUri } },
@@ -315,6 +332,7 @@ export function createServer(): McpServer {
         "Detailed read-only inspection of one container: restart count, " +
         "exit code, mounts, networks, labels, ports, and env var *names* " +
         "(never values — see design doc §9). Local socket only.",
+      annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: z.object({ id: z.string().describe("Container ID or name") }),
       outputSchema: ContainerDetailSchema,
       _meta: { ui: { resourceUri: dashboardUri } },
@@ -341,6 +359,7 @@ export function createServer(): McpServer {
       description:
         "Tail of a container's stdout/stderr (default last 100 lines). " +
         "Read-only, local socket only.",
+      annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: z.object({
         id: z.string().describe("Container ID or name"),
         tail: z.number().int().positive().optional().describe("Number of lines to tail (default 100)"),
@@ -366,6 +385,7 @@ export function createServer(): McpServer {
       description:
         "One-shot CPU/memory/network snapshot for a single container. " +
         "Read-only, local socket only.",
+      annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: z.object({ id: z.string().describe("Container ID or name") }),
       outputSchema: ContainerStatsSchema,
       _meta: { ui: { resourceUri: dashboardUri } },
@@ -408,6 +428,7 @@ export function createServer(): McpServer {
         "actually investigating something — via docker-logs/docker-inspect/" +
         "docker-stats or Bash — not before. This tool does not gather any " +
         "data itself.",
+      annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
       inputSchema: InvestigationReportSchema,
       outputSchema: InvestigationReportSchema,
       _meta: { ui: { resourceUri: reportUri } },
@@ -425,6 +446,143 @@ export function createServer(): McpServer {
     reportUri,
     "investigation-report.html",
     "Investigation Report UI",
+  );
+
+  // ===========================================================================
+  // Stage 4 (design doc §11 item 4): gated mutating actions. All render the
+  // dashboard resource so they show up in its Actions tab. `destructiveHint`
+  // is the standard MCP signal a compliant host can use to require its own
+  // confirmation — it's additive to, not a substitute for, the UI-side
+  // confirm dialog built in docker-dashboard.ts, per §9's defense-in-depth
+  // requirement.
+  // ===========================================================================
+
+  const containerIdInput = { id: z.string().describe("Container ID or name") };
+
+  registerAppTool(
+    server,
+    "docker-start",
+    {
+      title: "Start Container",
+      description: "Starts a stopped container. Tier 1 (design doc §4) — reversible, no data loss.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object(containerIdInput),
+      outputSchema: ActionResultSchema,
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ id }): Promise<CallToolResult> => {
+      const result = await startContainer(id);
+      return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "docker-restart",
+    {
+      title: "Restart Container",
+      description: "Restarts a running container. Tier 1 (design doc §4) — reversible, no data loss.",
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      inputSchema: z.object(containerIdInput),
+      outputSchema: ActionResultSchema,
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ id }): Promise<CallToolResult> => {
+      const result = await restartContainer(id);
+      return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "docker-pause",
+    {
+      title: "Pause Container",
+      description: "Freezes all processes in a running container. Tier 1 (design doc §4) — reversible.",
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      inputSchema: z.object(containerIdInput),
+      outputSchema: ActionResultSchema,
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ id }): Promise<CallToolResult> => {
+      const result = await pauseContainer(id);
+      return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "docker-unpause",
+    {
+      title: "Unpause Container",
+      description: "Resumes a paused container. Tier 1 (design doc §4) — reversible.",
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      inputSchema: z.object(containerIdInput),
+      outputSchema: ActionResultSchema,
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ id }): Promise<CallToolResult> => {
+      const result = await unpauseContainer(id);
+      return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "docker-stop",
+    {
+      title: "Stop Container",
+      description:
+        "Gracefully stops a running container (SIGTERM, then SIGKILL after a " +
+        "timeout). Tier 2 (design doc §4) — off by default, requires confirm.",
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      inputSchema: z.object(containerIdInput),
+      outputSchema: ActionResultSchema,
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ id }): Promise<CallToolResult> => {
+      const result = await stopContainer(id);
+      return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "docker-kill",
+    {
+      title: "Kill Container",
+      description:
+        "Immediately kills a running container (SIGKILL, no graceful shutdown). " +
+        "Tier 2 (design doc §4) — off by default, requires confirm.",
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+      inputSchema: z.object(containerIdInput),
+      outputSchema: ActionResultSchema,
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ id }): Promise<CallToolResult> => {
+      const result = await killContainer(id);
+      return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "docker-rm",
+    {
+      title: "Remove Container",
+      description:
+        "Permanently removes a stopped container — irreversible. Fails if the " +
+        "container is still running (no force option). Tier 2 (design doc §4) " +
+        "— off by default, requires confirm.",
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+      inputSchema: z.object(containerIdInput),
+      outputSchema: z.object({ id: z.string() }),
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ id }): Promise<CallToolResult> => {
+      const result = await removeContainer(id);
+      return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+    },
   );
 
   return server;

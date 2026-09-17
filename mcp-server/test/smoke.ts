@@ -10,6 +10,7 @@ import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import path from "node:path";
+import Docker from "dockerode";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -171,6 +172,70 @@ async function main() {
   console.log("build-investigation-report accepted sample report for:", reportEcho.subject);
 
   await assertHtmlResource(client, reportUri);
+
+  // =============================================================================
+  // Stage 4 (design doc §11 item 4): gated mutating actions.
+  // Runs against a dedicated, disposable container — not test-web/test-idle/
+  // test-crashed, which the earlier read-only assertions rely on staying put
+  // across repeated runs. Skipped gracefully if the local/sleeper:test image
+  // from Stages 1-3's manual setup isn't present (see SKILL.md for how it
+  // was built with no registry access).
+  // =============================================================================
+  for (const tool of ["docker-start", "docker-restart", "docker-pause", "docker-unpause", "docker-stop", "docker-kill", "docker-rm"]) {
+    assert(toolNames.includes(tool), `${tool} tool must be registered`);
+  }
+
+  const docker = new Docker();
+  const image = "local/sleeper:test";
+  const images = await docker.listImages({ filters: JSON.stringify({ reference: [image] }) });
+  if (images.length === 0) {
+    console.warn(`${image} not found — skipping Stage 4 lifecycle checks (see SKILL.md to build it)`);
+  } else {
+    const lifecycleContainer = await docker.createContainer({
+      Image: image,
+      name: `docker-skill-smoke-lifecycle-${Date.now()}`,
+    });
+    const lifecycleId = lifecycleContainer.id;
+    try {
+      await lifecycleContainer.start();
+
+      const pauseResult = await client.callTool({ name: "docker-pause", arguments: { id: lifecycleId } });
+      assert(!pauseResult.isError, "docker-pause must not error");
+      assert((pauseResult.structuredContent as any).state === "paused", "state must be 'paused' after docker-pause");
+
+      const unpauseResult = await client.callTool({ name: "docker-unpause", arguments: { id: lifecycleId } });
+      assert(!unpauseResult.isError, "docker-unpause must not error");
+      assert((unpauseResult.structuredContent as any).state === "running", "state must be 'running' after docker-unpause");
+
+      const restartResult = await client.callTool({ name: "docker-restart", arguments: { id: lifecycleId } });
+      assert(!restartResult.isError, "docker-restart must not error");
+      assert((restartResult.structuredContent as any).state === "running", "state must be 'running' after docker-restart");
+
+      const killResult = await client.callTool({ name: "docker-kill", arguments: { id: lifecycleId } });
+      assert(!killResult.isError, "docker-kill must not error");
+      assert((killResult.structuredContent as any).state === "exited", "state must be 'exited' after docker-kill");
+
+      const startResult = await client.callTool({ name: "docker-start", arguments: { id: lifecycleId } });
+      assert(!startResult.isError, "docker-start must not error");
+      assert((startResult.structuredContent as any).state === "running", "state must be 'running' after docker-start");
+
+      const stopResult = await client.callTool({ name: "docker-stop", arguments: { id: lifecycleId } });
+      assert(!stopResult.isError, "docker-stop must not error");
+      assert((stopResult.structuredContent as any).state === "exited", "state must be 'exited' after docker-stop");
+
+      const rmResult = await client.callTool({ name: "docker-rm", arguments: { id: lifecycleId } });
+      assert(!rmResult.isError, "docker-rm must not error");
+      console.log(`Stage 4 lifecycle OK: pause -> unpause -> restart -> kill -> start -> stop -> rm on ${lifecycleId.slice(0, 12)}`);
+
+      // docker-rm actually removed it — confirm dockerode agrees, not just that the tool said so.
+      const stillThere = await docker.listContainers({ all: true, filters: JSON.stringify({ id: [lifecycleId] }) });
+      assert(stillThere.length === 0, "container must actually be gone after docker-rm");
+    } finally {
+      // Best-effort cleanup if an assertion threw mid-lifecycle — docker-rm
+      // above already removed it on the happy path, so this is normally a no-op.
+      await lifecycleContainer.remove({ force: true }).catch(() => {});
+    }
+  }
 
   await client.close();
   console.log("\nSMOKE TEST PASSED");

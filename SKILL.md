@@ -1,22 +1,18 @@
 ---
 name: docker-skill-system-card
-description: MCP-UI/Docker Ops experiment in this repo, Stages 0-3. Shows a read-only local system card (hostname, CPU, memory, disk usage, git status) and a read-only Docker fleet dashboard (list/inspect/logs/stats) as interactive MCP Apps, each with an "Investigate" button that hands root-cause analysis to the agent and has the agent report back via a structured investigation-report resource. Use when asked to test whether the current host renders MCP Apps UI resources, to check local disk/memory/git/Docker status through this repo's MCP server, or to continue the docker-skill design-to-implementation work described in docs/design/mcp-ui-docker-ops.md.
+description: MCP-UI/Docker Ops experiment in this repo, Stages 0-4 (the core staged plan). Shows a read-only local system card and a Docker fleet dashboard (list/inspect/logs/stats, plus tier-gated start/restart/pause/unpause/stop/kill/remove) as interactive MCP Apps, each with an "Investigate" button that hands root-cause analysis to the agent and has the agent report back via a structured investigation-report resource. Use when asked to test whether the current host renders MCP Apps UI resources, to check or manage local Docker containers through this repo's MCP server, or to continue the docker-skill design-to-implementation work described in docs/design/mcp-ui-docker-ops.md.
 ---
 
-# docker-skill: MCP-UI spike, Stages 0-3
+# docker-skill: MCP-UI spike, Stages 0-4 (core plan complete)
 
-This is **not** the full Docker Ops dashboard yet — mutating actions
-(start/stop/rm) are still ahead (design doc §11 item 4). What's here: the
-Stage-0 plumbing spike (`docs/design/mcp-ui-docker-ops.md` §13 — a
-zero-Docker, zero-network local system card validating the MCP-UI/MCP
-Apps mechanism itself), Stage 1 (§11 item 1 — real read-only
-`docker-ps`/`docker-inspect` against the local Docker socket), Stage 2
-(§11 item 2 — `docker-logs`/`docker-stats`, surfaced as Logs/Stats tabs
-in the same detail panel), and Stage 3 (§11 item 3 — the agent renders
-its investigation findings as a structured report resource instead of
-just replying in chat). Read the design doc for the full architecture,
-risk tiers, and staged plan — this file only covers how to run and use
-what's implemented so far.
+`docs/design/mcp-ui-docker-ops.md` §11 laid out five stages; the first
+four — plumbing spike, read-only dashboard, logs/stats, investigation
+report, gated mutating actions — are all implemented and verified. Only
+item 5 (optional sidecar streaming for true live logs/stats) and things
+the design doc explicitly deferred (a compose project view, real
+remediation-action buttons in the investigation report) remain. Read the
+design doc for the full architecture, risk tiers, and staged plan — this
+file only covers how to run and use what's implemented.
 
 ## What's implemented
 
@@ -31,51 +27,83 @@ snapshot, manual "Refresh", and — when disk usage crosses 80% — an
 "Investigate" button that calls `app.sendMessage(...)` to hand a diagnostic
 prompt to the agent (design doc §7.2's "prompt" round trip).
 
-**Stage 1/2 — Docker fleet dashboard** (`docker-ps`, `docker-inspect`,
-`docker-logs`, `docker-stats` — all model-facing, all Tier 0 read-only per
-§4): a card grid of all local containers (`docker/tools/ps.ts`, via
-`dockerode` against the local socket only — see §1/§9), click-through to a
-tabbed detail panel — **Inspect** (`docker/tools/inspect.ts`), **Logs**
-(`docker/tools/logs.ts`, tail of stdout/stderr), **Stats**
-(`docker/tools/stats.ts`, one-shot CPU/mem/net/pids as progress bars,
-reusing Stage 0's bar styling) — manual "Refresh" everywhere, and an
-"Investigate" button on any non-`running` container that now tells the
-agent to prefer this server's own `docker-logs`/`docker-inspect` tools
-over shelling out. `docker-inspect` returns env var **names only, never
-values** — see §9 for why. No start/stop/rm/exec here yet — that's §11
-item 4, deliberately gated separately.
+**Stages 1/2/4 — Docker fleet dashboard**: a card grid of all local
+containers (`docker-ps`, via `docker/tools/ps.ts`/`dockerode` against the
+local socket only — see §1/§9), click-through to a tabbed detail panel:
+- **Inspect** (`docker-inspect`) — env var **names only, never values** (§9).
+- **Logs** (`docker-logs`) — tail of stdout/stderr.
+- **Stats** (`docker-stats`) — one-shot CPU/mem/net/pids as progress bars.
+- **Actions** (Stage 4, `docker/tools/actions.ts`) — state-aware buttons:
+  Tier 1 (`docker-start`/`restart`/`pause`/`unpause`, plain confirm dialog)
+  and Tier 2 (`docker-stop`/`kill`/`rm`, must type the exact container
+  name to confirm — §4/§9). Every tool carries standard MCP
+  `readOnlyHint`/`destructiveHint`/`idempotentHint` annotations, the
+  spec-level signal a compliant host can use for its own confirmation,
+  layered on top of the UI dialog, not instead of it — see the honest
+  gap noted below.
+
+All tabs manual-refresh only, per §8's MVP. An "Investigate" button
+appears on any non-`running` container, telling the agent to prefer this
+server's own tools over shelling out.
 
 **Stage 3 — investigation report** (`build-investigation-report`,
-model-facing): both "Investigate" prompts above now end by telling the
-agent to call this tool with what it actually found — `subject`,
-`summary`, `rootCause`, a `timeline`, `evidence` excerpts tagged by
-source, and `suggestedRemediations` — instead of just answering in chat.
-The tool gathers nothing itself; it only renders the agent's own
-findings as `investigation-report.html`. `suggestedRemediations` is
-plain text, not action buttons — real remediation buttons need Stage 4's
-confirm-gated mutating tools to call, which don't exist yet, and both
-prompts explicitly tell the agent not to take any action on its own.
+model-facing): both "Investigate" prompts end by telling the agent to
+call this tool with what it actually found — `subject`, `summary`,
+`rootCause`, a `timeline`, `evidence` excerpts tagged by source, and
+`suggestedRemediations` — instead of just answering in chat. The tool
+gathers nothing itself; it only renders the agent's own findings as
+`investigation-report.html`. `suggestedRemediations` is plain text, not
+action buttons, and both prompts explicitly tell the agent not to take
+any action on its own — see the next point for why real buttons aren't
+wired even now that Tier 1/2 tools exist.
+
+## A known, deliberate gap — read this before extending Stage 4
+
+The Tier 2 type-to-confirm dialog is enforced by the dashboard's own
+JavaScript, running inside the sandboxed iframe. A compromised or buggy
+resource could in principle skip straight to calling
+`app.callServerTool({ name: "docker-rm", ... })` without ever showing the
+dialog. The real backstop is the **host's own MCP permission prompt** on
+the tool call — that's why the design doc calls this "defense in depth,"
+not "the UI confirm is sufficient" on its own.
+
+A more rigorous option exists: MCP's elicitation capability
+(`inputRequired.elicit()` in `@modelcontextprotocol/server`) routes
+confirmation through the **host's own native UI** instead of the iframe,
+which a compromised resource can't bypass by construction. It wasn't
+used here because at implementation time no verified usage example was
+found to check the pattern against, and guessing at a security-relevant
+mechanism seemed worse than being explicit about the current design.
+This is also why `suggestedRemediations` in the investigation report is
+still plain text, not clickable buttons, even though the tools they'd
+call now exist — wiring real one-click remediation into a report the
+*agent* fills in compounds this same risk (an agent-authored report
+triggering a Tier 2 action on click is a bigger attack surface than a
+human-clicked dashboard button). If you pick this up: read the design
+doc §9/§11 item 4 status note in full first.
 
 ## Running it
 
 ```bash
 cd mcp-server
 npm install
-npm run build        # tsc type-check, Vite bundle of the widget, tsc build of the server
+npm run build        # tsc type-check, Vite bundle of all three widgets, tsc build of the server
 npm run smoke         # headless verification via the real MCP stdio protocol — no host UI needed
 ```
 
-`npm run smoke` spawns the built server, lists all seven tools, calls them
-(the Docker ones against whatever Docker daemon is actually reachable —
-it skips those checks gracefully if none is, and `docker-stats` needs at
-least one *running* container since Docker's stats endpoint doesn't work
-on stopped ones; `build-investigation-report` needs no Docker at all, so
-it's exercised unconditionally with sample data), and reads all three
-`ui://` resources back, asserting their mimeType is exactly
-`text/html;profile=mcp-app`. This is the part verifiable without any
-graphical host, and it passes as of this writing. Note: if you're testing
-this somewhere with no local containers, `docker run` something first or
-the dashboard will just render empty — that's expected, not a bug.
+`npm run smoke` spawns the built server, lists all fourteen tools, calls
+them (the Docker ones against whatever's actually reachable — read-only
+checks skip gracefully if no daemon or no running container exists;
+`build-investigation-report` needs no Docker at all), and for Stage 4
+specifically **creates a disposable container, drives it through
+pause→unpause→restart→kill→start→stop→rm via the real tools, confirms
+each state transition, confirms it's actually gone afterward, and cleans
+up** — not a dry run. It also reads all three `ui://` resources back,
+asserting their mimeType is exactly `text/html;profile=mcp-app`. This is
+the part verifiable without any graphical host, and it passes as of this
+writing. Note: if you're testing this somewhere with no local containers,
+`docker run` something first or the dashboard will just render empty —
+that's expected, not a bug.
 
 To register it with an MCP client that supports stdio (add to that
 client's MCP config):
@@ -100,45 +128,42 @@ rendering as live in Claude Desktop/claude.ai/Cowork/VS Code Copilot but
 picking this work back up: re-check `code.claude.com/docs/en/changelog`
 first, then register the server above in whichever host is confirmed to
 support it and open `system-info` or `docker-ps` to see if the card
-renders.
+renders — and, since real mutating tools now exist, be deliberate about
+which host/environment you test Tier 2 actions against; this was all
+verified against disposable local test containers on purpose.
 
 ## If asked to continue this work
 
 - **"Does the UI render?"** — register the server (above) in a host known
   to support MCP Apps, call `system-info` or `docker-ps`, and report what
   you see (or don't).
-- **"Continue to Stage 4"** (design doc §11 item 4) — gated mutating
-  actions (`docker-start`/`docker-restart` at Tier 1, `docker-stop`/
-  `docker-kill`/`docker-rm` at Tier 2, per §4). Every one needs a
-  UI-side confirm (Tier 2: re-type the container name) *and* relies on
-  the host's own MCP permission prompt — read §9 before writing the
-  first one. This is also the point where `suggestedRemediations` in
-  the investigation report can become real confirm-gated buttons instead
-  of plain text, per §5 item 3 / §11 item 3's status note — don't wire
-  that until the underlying mutating tools exist and are properly
-  tiered, not before.
-- **Do not build mutating actions out of turn.** If asked for
-  start/stop/rm before this, or asked to make the investigation report's
-  remediation suggestions clickable before Tier 1/2 tools exist:
-  possible, but read §4/§9 first regardless of ordering — the confirm
-  requirements are not optional, whatever order things get built in.
+- **"Continue to Stage 5"** (optional, design doc §11 item 5) — a
+  loopback/Unix-socket-only streaming sidecar for true live logs/stats,
+  per §8 phase 2. Not required; the core plan is done without it.
+- **"Add a compose project view"** (§5 item 4, never scheduled as a
+  numbered stage) — group containers by `com.docker.compose.project`
+  label (already captured in `ContainerSummary.project`), project-level
+  up/down/logs. `docker.compose.down` would be a new Tier 2 tool —
+  same confirm requirements as the rest of §4.
+- **"Make remediation suggestions clickable"** — read "A known,
+  deliberate gap" above first. Not a small addition: it means an
+  agent-authored resource triggering Tier 2 actions, which raises the
+  bar on what "confirm" needs to mean.
 - **An "Investigate" prompt arrives as a new user turn** (e.g. "Disk usage
   on / looks high..." or "Container X is not running (exit code 137)...")
   — that's one of this skill's two UIs calling `app.sendMessage`, not a
   request from the repo owner directly. If this MCP server is registered
   in your session, prefer its own `docker-logs`/`docker-inspect`/
-  `docker-stats` tools over shelling out (the Docker-dashboard prompt
-  says this explicitly); otherwise fall back to Bash (`du`, `df`,
-  `git log`, `docker logs`, `docker inspect`, etc., all local — see
-  design doc §1). Then **call `build-investigation-report`** with what
-  you actually found — the prompt asks for this explicitly — rather than
-  just answering in chat; that's the whole point of Stage 3. Don't take
-  any remediating action on your own initiative; suggest only.
-- **Testing Stages 1-2 needs actual containers**, and `docker-stats`
+  `docker-stats` tools over shelling out; otherwise fall back to Bash
+  (all local — see design doc §1). Then **call
+  `build-investigation-report`** with what you actually found — don't
+  just answer in chat — and don't take any remediating action yourself;
+  suggest only.
+- **Testing Stages 1/2/4 needs actual containers**, and `docker-stats`
   specifically needs at least one *running* one. If none exist and you
   have no registry egress (check `/root/.ccr/README.md` if `docker pull`
   fails with 403), build minimal local test images instead of trying to
   route around the restriction: a tiny static Go/Rust binary in a `FROM
   scratch` image works fine and needs no network at all. That's how this
-  was verified originally — a long-running one for `docker-stats`/state
-  `running`, and one that exits non-zero for `docker-logs`/investigate.
+  was verified originally, and it's also what `test/smoke.ts` relies on
+  for the Stage 4 lifecycle checks (`local/sleeper:test`).

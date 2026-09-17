@@ -352,7 +352,17 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
 - **Tier 1/2 actions require both** a UI-side confirm (re-type the
   container name for tier 2) **and** rely on the host's normal MCP tool
   permission prompt — defense in depth, since a compromised or buggy
-  iframe shouldn't be able to single-click its way to `docker.rm`.
+  iframe shouldn't be able to single-click its way to `docker.rm`. As
+  implemented (§11 item 4 status), "defense in depth" is doing real
+  work here, not just a phrase: the UI confirm is iframe-enforced and
+  could in principle be bypassed by a compromised resource, so the host
+  prompt is the actual backstop. `destructiveHint`/`readOnlyHint` tool
+  annotations are set on every tool as the spec-level signal a
+  compliant host can act on. A stronger option — MCP's
+  `inputRequired.elicit()`, which routes confirmation through the
+  host's own native UI instead of the iframe — was considered and
+  deliberately not used yet, for lack of a verified usage example at
+  implementation time; see §11 item 4 for the full reasoning.
 - **Iframe sandboxing** — resource HTML served with a strict CSP (no
   remote script/style/font/img loading, everything inlined), `sandbox=
   "allow-scripts"` only (deliberately *not* combined with
@@ -373,12 +383,12 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
 
 ## 10. Package layout
 
-The layout below is what actually exists in this repo today (Stages 0-3),
+The layout below is what actually exists in this repo today (Stages 0-4),
 not a projection:
 
 ```
 docker-skill/                (repo root)
-  SKILL.md                   # implemented — Stage-0/1/2/3 usage + "how to continue" notes
+  SKILL.md                   # implemented — Stage-0/1/2/3/4 usage + "how to continue" notes
   mcp-server/
     package.json              # @modelcontextprotocol/ext-apps ^2.0.0,
                                # @modelcontextprotocol/server 2.0.0, dockerode ^5, zod ^4
@@ -388,7 +398,8 @@ docker-skill/                (repo root)
     server.ts                  # tool registration: system-info/system-poll (Stage 0),
                                 # docker-ps/docker-inspect (Stage 1),
                                 # docker-logs/docker-stats (Stage 2),
-                                # build-investigation-report (Stage 3)
+                                # build-investigation-report (Stage 3),
+                                # docker-start/restart/pause/unpause/stop/kill/rm (Stage 4)
     index.ts                   # entrypoint — StdioServerTransport only, no HTTP (§1)
     docker/
       client.ts                 # dockerode wrapper, local socket only (§9)
@@ -397,26 +408,30 @@ docker-skill/                (repo root)
         inspect.ts                # inspectContainer(id) — backs docker-inspect; env names only (§9)
         logs.ts                   # getContainerLogs(id, tail) — backs docker-logs; hand-demuxes Docker's frame format
         stats.ts                  # getContainerStats(id) — backs docker-stats; one-shot CPU/mem/net/pids
+        actions.ts                 # start/restart/pause/unpause/stop/kill/remove — Tier 1/2 (§4)
     mcp-app.html                # Stage 0 shell, referencing ./src/mcp-app.ts
-    docker-dashboard.html        # Stage 1/2 shell, referencing ./src/docker-dashboard.ts
+    docker-dashboard.html        # Stage 1/2/4 shell, referencing ./src/docker-dashboard.ts
     investigation-report.html    # Stage 3 shell, referencing ./src/investigation-report.ts
     src/
       mcp-app.ts                # Stage 0 App instance: ontoolresult, callServerTool, sendMessage (§6.0/§7)
       mcp-app.css
-      docker-dashboard.ts        # Stage 1/2 App instance: card grid, tabbed detail panel
-                                  # (Inspect/Logs/Stats), investigate
+      docker-dashboard.ts        # Stage 1/2/4 App instance: card grid, tabbed detail panel
+                                  # (Inspect/Logs/Stats/Actions), tier-gated confirm modal, investigate
       docker-dashboard.css
       investigation-report.ts    # Stage 3 App instance: renders findings the *agent* supplies;
                                   # no refresh/polling — a terminal, point-in-time report
       investigation-report.css
     test/
-      smoke.ts                  # headless verification over real stdio MCP protocol (§13/§11 status)
+      smoke.ts                  # headless verification over real stdio MCP protocol (§13/§11 status);
+                                 # Stage 4 checks run a full start/stop/rm lifecycle against a
+                                 # disposable container it creates and cleans up itself
     dist/                       # build output (gitignored)
 
-    # Stage 4+ (not yet created):
-    #   docker/tools/{compose,start,stop,rm}.ts — tier 1/2, confirm-gated
-    #   src/ for a compose project view; real remediation-action buttons
-    #   in the investigation report, once there's something safe for them to call
+    # Stage 5+ (optional, not yet created):
+    #   docker/tools/compose.ts — compose project view (§5 item 4)
+    #   sidecar streaming for true live logs/stats (§8 phase 2, §11 item 5)
+    #   real remediation-action buttons in the investigation report, now that
+    #   the Tier 1/2 tools they'd call actually exist
 
   docs/
     design/
@@ -497,6 +512,39 @@ before the next is started:
    action on its own — only report and suggest. Wiring real buttons is
    item 4's job once there's something safe for them to call.
 4. **Gated mutating actions** — tier 1/2 with confirms wired in.
+   **Status: done, with one honest gap.** `docker/tools/actions.ts` backs
+   seven new tools — Tier 1: `docker-start`, `docker-restart`,
+   `docker-pause`, `docker-unpause`; Tier 2: `docker-stop`, `docker-kill`,
+   `docker-rm` (no `force` option — removing a running container fails
+   loudly rather than silently stopping it first). Every tool carries the
+   standard MCP `readOnlyHint`/`destructiveHint`/`idempotentHint`/
+   `openWorldHint` annotations (retrofitted onto the Stage 0-3 tools too,
+   for correctness) — the spec-level signal a compliant host can use to
+   require its own confirmation, layered on top of, not instead of, the
+   UI-side confirm. The dashboard's new Actions tab shows only the
+   buttons valid for the container's current state (e.g. no "Start" on
+   something already running), Tier 1 gets a plain confirm dialog, Tier 2
+   requires typing the exact container name before the Confirm button
+   enables.
+
+   **The gap, stated plainly rather than glossed over:** the type-to-confirm
+   dialog is enforced by this resource's own JavaScript, running inside
+   the sandboxed iframe. A compromised or buggy template could in
+   principle skip straight to calling `app.callServerTool({name:
+   "docker-rm", ...})` without ever showing the dialog. The real backstop
+   is the host's own MCP permission prompt on the tool call itself — which
+   is exactly why §9 called this "defense in depth" rather than "the UI
+   confirm is sufficient." A more rigorous version exists and was
+   considered: MCP's elicitation capability (`inputRequired.elicit()` in
+   `@modelcontextprotocol/server`) lets a tool handler pause mid-call and
+   have the *host's own native UI* — not our iframe — collect the
+   confirmation, which a compromised resource can't bypass by construction.
+   It wasn't used here because it's new enough (introduced alongside the
+   2026-07-28 MCP Apps wire revision) that no example usage was found to
+   verify the pattern against, and getting a security-relevant mechanism
+   wrong via guesswork seemed worse than being explicit about relying on
+   the UI-dialog-plus-host-prompt combination instead. Revisit this if
+   the mutating tools ever move beyond an experimental spike.
 5. *(optional)* **Sidecar streaming** for true live logs/stats.
 
 ## 12. Open questions / risks

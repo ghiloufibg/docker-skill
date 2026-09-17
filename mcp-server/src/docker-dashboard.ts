@@ -1,7 +1,8 @@
 /**
- * @file Docker fleet dashboard — design doc §5 item 1 / §11 Stage 1.
- * Vanilla JS/DOM, no framework, per §6.1. Tier 0 (read-only) only: no
- * start/stop/rm actions here — that's §11 item 4, gated separately.
+ * @file Docker fleet dashboard — design doc §5 item 1 / §11 Stages 1-4.
+ * Vanilla JS/DOM, no framework, per §6.1. Mutating actions (Stage 4, §11
+ * item 4) live behind the Actions tab with tier-gated confirm dialogs —
+ * see showConfirm() and §9's defense-in-depth requirement.
  */
 import { App, applyDocumentTheme, applyHostStyleVariables, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import "./docker-dashboard.css";
@@ -61,7 +62,18 @@ const tabPanels: Record<string, HTMLElement> = {
   inspect: document.getElementById("tab-inspect")!,
   logs: document.getElementById("tab-logs")!,
   stats: document.getElementById("tab-stats")!,
+  actions: document.getElementById("tab-actions")!,
 };
+const actionsTier1 = document.getElementById("actions-tier1")!;
+const actionsTier2 = document.getElementById("actions-tier2")!;
+const actionsStatus = document.getElementById("actions-status")!;
+const confirmOverlay = document.getElementById("confirm-overlay")!;
+const confirmTitle = document.getElementById("confirm-title")!;
+const confirmBody = document.getElementById("confirm-body")!;
+const confirmTypeWrap = document.getElementById("confirm-type-wrap")!;
+const confirmTypeInput = document.getElementById("confirm-type-input") as HTMLInputElement;
+const confirmCancelBtn = document.getElementById("confirm-cancel-btn")!;
+const confirmOkBtn = document.getElementById("confirm-ok-btn") as HTMLButtonElement;
 const logsRefreshBtn = document.getElementById("logs-refresh-btn")!;
 const logsContent = document.getElementById("logs-content")!;
 const statsRefreshBtn = document.getElementById("stats-refresh-btn")!;
@@ -76,6 +88,7 @@ const statsPids = document.getElementById("stats-pids")!;
 const statsStatus = document.getElementById("stats-status")!;
 
 let currentContainerId: string | null = null;
+let currentDetail: ContainerDetail | null = null;
 
 function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -146,6 +159,7 @@ function escapeHtml(s: string): string {
 }
 
 function renderDetail(d: ContainerDetail): void {
+  currentDetail = d;
   detailTitle.textContent = d.name;
   detailBody.innerHTML = `
     <dt>State</dt><dd>${escapeHtml(d.status)}</dd>
@@ -158,24 +172,32 @@ function renderDetail(d: ContainerDetail): void {
     <dt>Labels</dt><dd>${Object.entries(d.labels).map(([k, v]) => escapeHtml(`${k}=${v}`)).join("<br>") || "--"}</dd>
   `;
   detailPanel.hidden = false;
+  if (!tabPanels.actions.hidden) renderActionsTab();
 }
 
-async function openDetail(id: string): Promise<void> {
-  currentContainerId = id;
-  logsContent.textContent = "--";
-  resetStatsDisplay();
-  switchTab("inspect");
+async function refreshDetail(id: string): Promise<void> {
   try {
     const result = await app.callServerTool({ name: "docker-inspect", arguments: { id } });
+    if (result.isError) throw new Error("docker-inspect returned an error");
     renderDetail(result.structuredContent as unknown as ContainerDetail);
   } catch (e) {
     console.error("docker-inspect failed:", e);
   }
 }
 
+async function openDetail(id: string): Promise<void> {
+  currentContainerId = id;
+  currentDetail = null;
+  logsContent.textContent = "--";
+  resetStatsDisplay();
+  switchTab("inspect");
+  await refreshDetail(id);
+}
+
 detailCloseBtn.addEventListener("click", () => {
   detailPanel.hidden = true;
   currentContainerId = null;
+  currentDetail = null;
 });
 
 // =============================================================================
@@ -192,6 +214,7 @@ function switchTab(tab: string): void {
   }
   if (tab === "logs") loadLogs();
   if (tab === "stats") loadStats();
+  if (tab === "actions") renderActionsTab();
 }
 
 for (const btn of tabBtns) {
@@ -251,6 +274,129 @@ async function loadStats(): Promise<void> {
 statsRefreshBtn.addEventListener("click", loadStats);
 
 // =============================================================================
+// Actions tab — Stage 4 (design doc §11 item 4). Tier 1/2 per §4; every
+// action needs a confirm here *and* relies on the host's own MCP
+// permission prompt for the underlying tool call — see §9's
+// defense-in-depth note and the residual-risk callout in the design doc:
+// this dialog is enforced by this iframe's own JS, which a compromised
+// resource could in principle skip, so the host-side prompt is the real
+// backstop, not a redundant formality.
+// =============================================================================
+
+interface ActionDef {
+  tool: string;
+  label: string;
+  tier: 1 | 2;
+  showIf: (state: string) => boolean;
+}
+
+const ACTION_DEFS: ActionDef[] = [
+  { tool: "docker-start", label: "Start", tier: 1, showIf: (s) => s !== "running" },
+  { tool: "docker-restart", label: "Restart", tier: 1, showIf: (s) => s === "running" },
+  { tool: "docker-pause", label: "Pause", tier: 1, showIf: (s) => s === "running" },
+  { tool: "docker-unpause", label: "Unpause", tier: 1, showIf: (s) => s === "paused" },
+  { tool: "docker-stop", label: "Stop", tier: 2, showIf: (s) => s === "running" || s === "paused" },
+  { tool: "docker-kill", label: "Kill", tier: 2, showIf: (s) => s === "running" || s === "paused" },
+  // No force option on docker-rm (design doc §9), so it's only offered once
+  // the container is already stopped — matches the tool's own behavior
+  // rather than offering a button that's guaranteed to fail.
+  { tool: "docker-rm", label: "Remove", tier: 2, showIf: (s) => s !== "running" && s !== "paused" },
+];
+
+function renderActionButtons(container: HTMLElement, defs: ActionDef[]): void {
+  container.innerHTML = "";
+  if (defs.length === 0) {
+    container.innerHTML = `<span class="empty">None available in this state.</span>`;
+    return;
+  }
+  for (const def of defs) {
+    const btn = document.createElement("button");
+    btn.className = def.tier === 2 ? "btn btn-small btn-danger" : "btn btn-small";
+    btn.textContent = def.label;
+    btn.addEventListener("click", () => handleAction(def));
+    container.appendChild(btn);
+  }
+}
+
+function renderActionsTab(): void {
+  if (!currentDetail) return;
+  actionsStatus.hidden = true;
+  const state = currentDetail.state;
+  renderActionButtons(actionsTier1, ACTION_DEFS.filter((a) => a.tier === 1 && a.showIf(state)));
+  renderActionButtons(actionsTier2, ACTION_DEFS.filter((a) => a.tier === 2 && a.showIf(state)));
+}
+
+// Tier 1: a plain confirm. Tier 2: the Confirm button stays disabled until
+// the typed text exactly matches the container name (design doc §4/§9).
+function showConfirm(def: ActionDef, containerName: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    confirmTitle.textContent = `${def.label} "${containerName}"?`;
+    confirmTypeInput.value = "";
+
+    if (def.tier === 2) {
+      confirmBody.textContent =
+        "Tier 2 action — off by default, per design doc §4. Type the container name to confirm.";
+      confirmTypeWrap.hidden = false;
+      confirmOkBtn.disabled = true;
+      confirmTypeInput.oninput = () => {
+        confirmOkBtn.disabled = confirmTypeInput.value !== containerName;
+      };
+    } else {
+      confirmBody.textContent = "Tier 1 action — reversible, per design doc §4.";
+      confirmTypeWrap.hidden = true;
+      confirmOkBtn.disabled = false;
+    }
+
+    confirmOverlay.hidden = false;
+
+    const cleanup = (result: boolean) => {
+      confirmOverlay.hidden = true;
+      confirmCancelBtn.onclick = null;
+      confirmOkBtn.onclick = null;
+      confirmTypeInput.oninput = null;
+      resolve(result);
+    };
+    confirmCancelBtn.onclick = () => cleanup(false);
+    confirmOkBtn.onclick = () => cleanup(true);
+  });
+}
+
+async function handleAction(def: ActionDef): Promise<void> {
+  if (!currentContainerId || !currentDetail) return;
+  const id = currentContainerId;
+  const containerName = currentDetail.name;
+
+  const confirmed = await showConfirm(def, containerName);
+  if (!confirmed) return;
+
+  actionsStatus.hidden = true;
+  try {
+    const result = await app.callServerTool({ name: def.tool, arguments: { id } });
+    if (result.isError) throw new Error("tool returned an error");
+
+    actionsStatus.className = "actions-status ok";
+    actionsStatus.textContent = `${def.label} succeeded.`;
+    actionsStatus.hidden = false;
+
+    await refreshCardList(); // state changed — the fleet list is stale either way
+
+    if (def.tool === "docker-rm") {
+      // The container no longer exists — nothing left to re-inspect.
+      detailPanel.hidden = true;
+      currentContainerId = null;
+      currentDetail = null;
+    } else {
+      await refreshDetail(id);
+    }
+  } catch (e) {
+    console.error(`${def.tool} failed:`, e);
+    actionsStatus.className = "actions-status error";
+    actionsStatus.textContent = `${def.label} failed — see console.`;
+    actionsStatus.hidden = false;
+  }
+}
+
+// =============================================================================
 // MCP App
 // =============================================================================
 
@@ -263,7 +409,7 @@ app.ontoolresult = (result) => {
 };
 
 // Manual refresh (design doc §8 MVP) — re-calls the same model-facing tool.
-refreshBtn.addEventListener("click", async () => {
+async function refreshCardList(): Promise<void> {
   refreshBtn.setAttribute("disabled", "true");
   try {
     const result = await app.callServerTool({ name: "docker-ps", arguments: {} });
@@ -274,7 +420,8 @@ refreshBtn.addEventListener("click", async () => {
   } finally {
     refreshBtn.removeAttribute("disabled");
   }
-});
+}
+refreshBtn.addEventListener("click", refreshCardList);
 
 // "Investigate" on a non-running container — design doc §7.2's "prompt"
 // round trip, same pattern as the Stage-0 system card.

@@ -26,6 +26,7 @@
         <button class="tab-btn active" data-tab="inspect">Inspect</button>
         <button class="tab-btn" data-tab="logs">Logs</button>
         <button class="tab-btn" data-tab="stats">Stats</button>
+        <button class="tab-btn" data-tab="actions">Actions</button>
       </div>
 
       <div id="tab-inspect" class="tab-panel">
@@ -55,7 +56,41 @@
           <span>PIDs <span id="stats-pids">--</span></span>
         </div>
       </div>
+
+      <div id="tab-actions" class="tab-panel" hidden>
+        <p class="actions-tier-note">
+          Tier 1 actions (Start/Restart/Pause/Unpause) ask for a simple confirm.
+          Tier 2 actions (Stop/Kill/Remove) require typing the container name —
+          see design doc §4/§9.
+        </p>
+        <div class="actions-group">
+          <h3 class="actions-group-title">Tier 1</h3>
+          <div id="actions-tier1" class="actions-buttons"></div>
+        </div>
+        <div class="actions-group">
+          <h3 class="actions-group-title">Tier 2</h3>
+          <div id="actions-tier2" class="actions-buttons"></div>
+        </div>
+        <div id="actions-status" class="actions-status" hidden></div>
+      </div>
     </section>
+
+    <div id="confirm-overlay" class="confirm-overlay" hidden>
+      <div class="confirm-dialog">
+        <h3 id="confirm-title" class="confirm-title">--</h3>
+        <p id="confirm-body" class="confirm-body">--</p>
+        <div id="confirm-type-wrap" class="confirm-type-wrap" hidden>
+          <label for="confirm-type-input" class="confirm-type-label">
+            Type the container name to confirm:
+          </label>
+          <input id="confirm-type-input" class="confirm-type-input" type="text" autocomplete="off">
+        </div>
+        <div class="confirm-actions">
+          <button id="confirm-cancel-btn" class="btn btn-small">Cancel</button>
+          <button id="confirm-ok-btn" class="btn btn-small btn-danger" disabled>Confirm</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <script type="module" src="./src/docker-dashboard.ts"></script>

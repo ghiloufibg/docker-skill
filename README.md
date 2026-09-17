@@ -11,14 +11,19 @@ security model, and staged plan.
 
 ## Status
 
-**Stages 0-3 (design doc §11/§13) are implemented and passing their
-headless smoke test** — a local system card, a real read-only Docker
-fleet dashboard (`docker-ps`/`docker-inspect`/`docker-logs`/`docker-stats`
-against the local Docker socket, with a tabbed detail panel), and an
-investigation-report resource the agent fills in with its own findings
-after "Investigate" is clicked. Only gated mutating actions (start/stop/
-rm) are still ahead. See [`SKILL.md`](SKILL.md) for what's implemented
-and how to run it.
+**Stages 0-4 — the whole core staged plan from design doc §11 — are
+implemented and passing their headless smoke test.** A local system
+card; a real Docker fleet dashboard (`docker-ps`/`docker-inspect`/
+`docker-logs`/`docker-stats`, tabbed detail panel) against the local
+Docker socket; an investigation-report resource the agent fills in with
+its own findings after "Investigate" is clicked; and tier-gated mutating
+actions (`docker-start`/`restart`/`pause`/`unpause` at Tier 1,
+`docker-stop`/`kill`/`rm` at Tier 2, each requiring its own confirm —
+Tier 2 requires typing the container name). Only the optional Stage 5
+(streaming) and things never scheduled as stages (a compose view, real
+one-click remediation) remain. See [`SKILL.md`](SKILL.md) for what's
+implemented, a documented residual gap in the Tier 2 confirm design, and
+how to run it.
 
 ```bash
 cd mcp-server
@@ -27,10 +32,12 @@ npm run build
 npm run smoke
 ```
 
-`npm run smoke` spawns the built server over the real MCP stdio protocol,
-calls all seven tools (the Docker ones against whatever's actually
-running locally), and confirms all three returned resources match the
-official MCP Apps shape (`text/html;profile=mcp-app`). That's verified.
-**Whether the UI actually *renders* in the Claude Code CLI is not** — see
-the design doc §12 and `SKILL.md` for why, and what to check before
-going further.
+`npm run smoke` spawns the built server over the real MCP stdio protocol
+and calls all fourteen tools. For the mutating ones, it's not a dry run:
+it creates a disposable container, drives it through
+pause→unpause→restart→kill→start→stop→rm via the real tools, confirms
+each state transition and that it's actually gone afterward, then cleans
+up. It also confirms all three returned resources match the official MCP
+Apps shape (`text/html;profile=mcp-app`). That's verified. **Whether the
+UI actually *renders* in the Claude Code CLI is not** — see the design
+doc §12 and `SKILL.md` for why, and what to check before going further.

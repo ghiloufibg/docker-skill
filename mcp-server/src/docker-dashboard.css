@@ -279,3 +279,106 @@ body {
   color: var(--muted);
   margin-top: 4px;
 }
+
+.btn-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.actions-tier-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 12px 0;
+}
+
+.actions-group {
+  margin-bottom: 12px;
+}
+
+.actions-group-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 6px 0;
+}
+
+.actions-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.actions-buttons .empty {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.actions-status {
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.actions-status.error {
+  color: var(--danger);
+}
+
+.actions-status.ok {
+  color: var(--success);
+}
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.confirm-dialog {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  width: min(320px, calc(100vw - 32px));
+}
+
+.confirm-title {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+}
+
+.confirm-body {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.confirm-type-wrap {
+  margin-bottom: 12px;
+}
+
+.confirm-type-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.confirm-type-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
