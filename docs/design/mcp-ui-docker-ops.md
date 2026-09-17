@@ -16,7 +16,7 @@ whether that round trip is fast/safe enough to be worth building on.
 Docker ops is a good *second* test because it's stateful, visual, and has a
 natural mix of safe (read) and dangerous (mutate) actions — useful for
 proving out the permission model. But it is not the best *first* test,
-because it also drags in Docker-socket security. See §12 for the
+because it also drags in Docker-socket security. See §13 for the
 recommended spike target instead.
 
 **Deployment model: single machine, no remote communication.** The agent,
@@ -28,13 +28,13 @@ host. Concretely:
   listening socket for the MCP connection itself). There's nothing to
   authenticate on that channel because it's never exposed off-box.
 - Docker is reached through the local `/var/run/docker.sock` only —
-  never a remote/TCP Docker context (already the case in §8, restated
+  never a remote/TCP Docker context (already the case in §9, restated
   here as a hard constraint, not just a v1 simplification).
-- If the phase-2 streaming sidecar (§7) is ever built, it binds to a Unix
+- If the phase-2 streaming sidecar (§8) is ever built, it binds to a Unix
   domain socket or `127.0.0.1` only, and is treated as **local IPC, not a
   network service** — no port forwarding, no binding to `0.0.0.0`, ever.
 - Every tool this skill exposes operates on local resources. Nothing in
-  scope calls out to a remote API, so the Stage-0 spike (§12) has to be
+  scope calls out to a remote API, so the Stage-0 spike (§13) has to be
   chosen accordingly.
 
 ## 2. Architecture
@@ -123,9 +123,64 @@ prompt.
 4. **Compose project view** — group containers by
    `com.docker.compose.project` label, project-level up/down/logs.
 
-## 6. Communication protocol in detail
+## 6. UI rendering stack
 
-### 6.1 Data round trip (`tool` messages)
+**Default: no framework — vanilla JS/DOM, hand-rolled inline SVG for
+charts, plain CSS.** This follows directly from constraints already set
+elsewhere in this doc, not from a general dislike of frameworks:
+
+- The CSP in §9 forbids loading any remote script/style — everything has
+  to be inlined into the `ui://` resource's HTML string. Whatever UI code
+  runs has to ship as bytes inside every tool result, and per §8 that
+  resource gets rebuilt on every refresh/poll. A framework runtime is a
+  fixed tax on every one of those round trips; vanilla JS has none.
+- The screens in §5 are cards, tables, tabs, a log pane, small
+  charts, and confirm dialogs — plain DOM manipulation handles all of
+  that without needing component lifecycle, virtual DOM diffing, or a
+  state-management layer.
+- Fewer moving parts is also a security property here: §9 already treats
+  the iframe as untrusted-ish and reasons about exactly what code runs
+  inside it. A framework is more surface to have read through once, for
+  no behavior this UI needs.
+- Charts (CPU/mem sparklines, per the `dataviz` skill referenced in §5):
+  hand-rolled inline `<svg>`, not a charting library. Something like
+  Chart.js is either pulled from a CDN (forbidden by the CSP and by the
+  no-network-dependency rule in §1) or vendored in full (tens of KB
+  inlined into every dashboard response for a handful of sparklines) —
+  a bad trade either way for shapes this simple.
+- One small shared script (`assets/app.js` in §10) is reused — verbatim,
+  inlined — across every template. It is *not* a UI framework, just the
+  postMessage bridge: send a `tool`/`prompt` message, validate
+  `event.origin` on the way back, and a couple of DOM helpers (`h()`-style
+  element builders, event delegation for tier-gated confirm dialogs).
+
+**Escape hatch, not a default:** if the investigation-report view
+(§5, item 3) turns out to need real component composition once Stage 3 is built —
+nested, conditionally-rendered panels, re-used list/card components — the
+fallback is **Preact + htm** (~4 KB gzipped, no JSX build step since htm
+uses tagged template literals). It compiles to a single minified script
+inlined the same way as the vanilla helper, so it doesn't break the
+CSP/no-network constraint — it's just a bigger inline payload. Reach for
+it only when plain DOM code has visibly become the harder path to read,
+not by default.
+
+**Explicitly ruled out:**
+- React/Vue/Angular — runtime and typical component-library weight isn't
+  justified by screens this simple, and it's a much bigger inline payload
+  on every response.
+- Any kit that assumes CDN-hosted fonts/icons/CSS (Bootstrap-via-CDN,
+  Font Awesome, Tailwind's CDN build) — violates the CSP in §9 outright;
+  a self-hosted/inlined Tailwind build is possible but adds a build step
+  for no real benefit over a small hand-written stylesheet at this scale.
+- htmx — its whole model is "fetch HTML over HTTP on interaction," which
+  doesn't fit the stdio/tool-call channel in §1. Only worth reconsidering
+  if the phase-2 local streaming sidecar (§8) grows into something htmx
+  could target directly, and even then it'd be additive, not a
+  replacement for the tool/prompt postMessage protocol.
+
+## 7. Communication protocol in detail
+
+### 7.1 Data round trip (`tool` messages)
 
 ```mermaid
 sequenceDiagram
@@ -145,7 +200,7 @@ sequenceDiagram
 Tier 0 tools are pre-approved so this loop never stalls on a permission
 prompt; that's what makes "Refresh" and polling viable.
 
-### 6.2 Investigation round trip (`prompt` messages)
+### 7.2 Investigation round trip (`prompt` messages)
 
 ```mermaid
 sequenceDiagram
@@ -168,7 +223,7 @@ only to fetch data and package it as tool results / UI templates; keeping
 the agent's normal tool-use ability instead of a bespoke rules engine that
 has to be separately maintained.
 
-## 7. State and refresh strategy
+## 8. State and refresh strategy
 
 MCP tool results are point-in-time snapshots, so "live" views need one of:
 
@@ -189,7 +244,7 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
   §9) since this is a live same-origin-ish channel. Deferred until the
   basic technique is proven.
 
-## 8. Security and permission model
+## 9. Security and permission model
 
 - **Docker socket access is root-equivalent on the host.** There is no
   fine-grained read-only mode for the socket itself, so all access control
@@ -218,13 +273,13 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
   scope for this design entirely.
 - **No network exposure anywhere in the design** — the MCP transport is
   stdio, the Docker connection is a local socket, and the optional
-  streaming sidecar (§7) is loopback/Unix-socket only. The threat model
+  streaming sidecar (§8) is loopback/Unix-socket only. The threat model
   is therefore "what can a local process or the rendered iframe do,"
   not "what can a remote attacker reach" — which is precisely why the
   iframe sandboxing and tool-tier confirms above matter more here than
   network-level auth would.
 
-## 9. Package layout (for the implementation phase — not created yet)
+## 10. Package layout (for the implementation phase — not created yet)
 
 ```
 docker-ops-skill/
@@ -256,12 +311,12 @@ docker-ops-skill/
       mcp-ui-docker-ops.md   <- this file
 ```
 
-## 10. Staged validation plan
+## 11. Staged validation plan
 
 Build (and validate) in this order — each stage should be provably working
 before the next is started:
 
-0. **Spike the plumbing on something low-stakes** (see §12 for the
+0. **Spike the plumbing on something low-stakes** (see §13 for the
    recommended target) — confirm the host actually renders `ui://`
    resources and round-trips both `tool` and `prompt` postMessages.
 1. **Read-only dashboard** — `docker.ps` + `docker.inspect`, manual
@@ -272,7 +327,7 @@ before the next is started:
 4. **Gated mutating actions** — tier 1/2 with confirms wired in.
 5. *(optional)* **Sidecar streaming** for true live logs/stats.
 
-## 11. Open questions / risks
+## 12. Open questions / risks
 
 - **Unconfirmed: does the Claude Code host currently render MCP-UI
   resources and support the postMessage bridge at all?** This is the
@@ -287,7 +342,7 @@ before the next is started:
 - Does the host give any origin/identity guarantee for postMessage
   events we can rely on, or is that entirely our own validation to build?
 
-## 12. Recommended first spike (better test use case for Stage 0)
+## 13. Recommended first spike (better test use case for Stage 0)
 
 Before wiring anything to a Docker socket, validate the MCP-UI mechanism
 itself against something with **zero blast radius and zero network
@@ -308,5 +363,5 @@ the agent to investigate (it can freely use Bash locally — `du`, `df`,
 
 without touching anything privileged or leaving the machine. Once that's
 proven, the Docker dashboard is a straightforward re-skin with a real
-permission model layered on top per §8 — still entirely local, per the
+permission model layered on top per §9 — still entirely local, per the
 deployment model in §1.
