@@ -11,12 +11,14 @@ security model, and staged plan.
 
 ## Status
 
-**Stages 0-2 (design doc §11/§13) are implemented and passing their
-headless smoke test** — a local system card, and a real read-only Docker
+**Stages 0-3 (design doc §11/§13) are implemented and passing their
+headless smoke test** — a local system card, a real read-only Docker
 fleet dashboard (`docker-ps`/`docker-inspect`/`docker-logs`/`docker-stats`
-against the local Docker socket, with a tabbed detail panel). Mutating
-actions and the investigation-report view are still ahead. See
-[`SKILL.md`](SKILL.md) for what's implemented and how to run it.
+against the local Docker socket, with a tabbed detail panel), and an
+investigation-report resource the agent fills in with its own findings
+after "Investigate" is clicked. Only gated mutating actions (start/stop/
+rm) are still ahead. See [`SKILL.md`](SKILL.md) for what's implemented
+and how to run it.
 
 ```bash
 cd mcp-server
@@ -26,8 +28,9 @@ npm run smoke
 ```
 
 `npm run smoke` spawns the built server over the real MCP stdio protocol,
-calls all six tools (the Docker ones against whatever's actually running
-locally), and confirms both returned resources match the official MCP
-Apps shape (`text/html;profile=mcp-app`). That's verified. **Whether the
-UI actually *renders* in the Claude Code CLI is not** — see the design
-doc §12 and `SKILL.md` for why, and what to check before going further.
+calls all seven tools (the Docker ones against whatever's actually
+running locally), and confirms all three returned resources match the
+official MCP Apps shape (`text/html;profile=mcp-app`). That's verified.
+**Whether the UI actually *renders* in the Claude Code CLI is not** — see
+the design doc §12 and `SKILL.md` for why, and what to check before
+going further.

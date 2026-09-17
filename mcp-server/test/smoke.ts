@@ -134,6 +134,44 @@ async function main() {
     }
   }
 
+  // =============================================================================
+  // Stage 3 (design doc §11 item 3): build-investigation-report.
+  // This tool doesn't gather data itself, so it works with no Docker daemon —
+  // exercised unconditionally with representative sample data.
+  // =============================================================================
+  assert(toolNames.includes("build-investigation-report"), "build-investigation-report tool must be registered");
+
+  const reportTool = tools.find((t) => t.name === "build-investigation-report")!;
+  const reportUri = (reportTool._meta as any)?.ui?.resourceUri;
+  assert(typeof reportUri === "string" && reportUri.startsWith("ui://"), "report resourceUri must be a ui:// URI");
+
+  const sampleReport = {
+    subject: "test-crashed",
+    summary: "Container exits immediately with code 137, consistent with an OOM kill or explicit self-termination.",
+    rootCause: "The process calls os.Exit(137) on startup — this is a deliberate exit, not a crash.",
+    timeline: [
+      { timestamp: "2026-09-17T14:22:29.081Z", event: "Container started" },
+      { timestamp: "2026-09-17T14:22:29.187Z", event: "Process exited with code 137" },
+    ],
+    evidence: [
+      { source: "docker-logs", excerpt: "crasher: simulating OOM-ish exit" },
+      { source: "docker-inspect", excerpt: "ExitCode: 137, RestartCount: 0" },
+    ],
+    suggestedRemediations: [
+      "Check the application's own logs for the actual failure reason.",
+      "If this is unexpected, compare against a known-good image version.",
+    ],
+  };
+
+  const reportResult = await client.callTool({ name: "build-investigation-report", arguments: sampleReport });
+  assert(!reportResult.isError, "build-investigation-report call must not error");
+  const reportEcho = reportResult.structuredContent as any;
+  assert(reportEcho.subject === sampleReport.subject, "report structuredContent must echo the input");
+  assert(reportEcho.timeline.length === 2, "report timeline must round-trip intact");
+  console.log("build-investigation-report accepted sample report for:", reportEcho.subject);
+
+  await assertHtmlResource(client, reportUri);
+
   await client.close();
   console.log("\nSMOKE TEST PASSED");
 }

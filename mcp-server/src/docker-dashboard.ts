@@ -284,8 +284,11 @@ async function investigate(c: ContainerSummary): Promise<void> {
     `(state: ${c.state}, status: ${c.status}${c.exitCode !== null ? `, exit code ${c.exitCode}` : ""}). ` +
     `Investigate why — prefer this server's docker-logs and docker-inspect ` +
     `tools if you have them (container id "${c.id}"), otherwise fall back ` +
-    `to \`docker logs ${c.name}\` / \`docker inspect ${c.name}\` via Bash — ` +
-    `and summarize the likely root cause.`;
+    `to \`docker logs ${c.name}\` / \`docker inspect ${c.name}\` via Bash. ` +
+    `Once you've actually looked, call this server's build-investigation-report ` +
+    `tool with your findings (subject "${c.name}") instead of just replying ` +
+    `in chat — root cause, the log lines/inspect fields you based it on as ` +
+    `evidence, and remediation as suggestions only (don't take any action).`;
   try {
     const { isError } = await app.sendMessage(
       { role: "user", content: [{ type: "text", text: prompt }] },

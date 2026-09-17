@@ -373,12 +373,12 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
 
 ## 10. Package layout
 
-The layout below is what actually exists in this repo today (Stage 0 +
-Stage 1), not a projection:
+The layout below is what actually exists in this repo today (Stages 0-3),
+not a projection:
 
 ```
 docker-skill/                (repo root)
-  SKILL.md                   # implemented — Stage-0/1 usage + "how to continue" notes
+  SKILL.md                   # implemented — Stage-0/1/2/3 usage + "how to continue" notes
   mcp-server/
     package.json              # @modelcontextprotocol/ext-apps ^2.0.0,
                                # @modelcontextprotocol/server 2.0.0, dockerode ^5, zod ^4
@@ -387,7 +387,8 @@ docker-skill/                (repo root)
     vite.config.ts             # vite-plugin-singlefile: bundles each entrypoint into one inlined HTML
     server.ts                  # tool registration: system-info/system-poll (Stage 0),
                                 # docker-ps/docker-inspect (Stage 1),
-                                # docker-logs/docker-stats (Stage 2)
+                                # docker-logs/docker-stats (Stage 2),
+                                # build-investigation-report (Stage 3)
     index.ts                   # entrypoint — StdioServerTransport only, no HTTP (§1)
     docker/
       client.ts                 # dockerode wrapper, local socket only (§9)
@@ -398,19 +399,24 @@ docker-skill/                (repo root)
         stats.ts                  # getContainerStats(id) — backs docker-stats; one-shot CPU/mem/net/pids
     mcp-app.html                # Stage 0 shell, referencing ./src/mcp-app.ts
     docker-dashboard.html        # Stage 1/2 shell, referencing ./src/docker-dashboard.ts
+    investigation-report.html    # Stage 3 shell, referencing ./src/investigation-report.ts
     src/
       mcp-app.ts                # Stage 0 App instance: ontoolresult, callServerTool, sendMessage (§6.0/§7)
       mcp-app.css
       docker-dashboard.ts        # Stage 1/2 App instance: card grid, tabbed detail panel
                                   # (Inspect/Logs/Stats), investigate
       docker-dashboard.css
+      investigation-report.ts    # Stage 3 App instance: renders findings the *agent* supplies;
+                                  # no refresh/polling — a terminal, point-in-time report
+      investigation-report.css
     test/
       smoke.ts                  # headless verification over real stdio MCP protocol (§13/§11 status)
     dist/                       # build output (gitignored)
 
-    # Stage 3+ (not yet created):
-    #   docker/tools/{compose,investigate}.ts
-    #   src/ templates for investigation-report resource, compose project view
+    # Stage 4+ (not yet created):
+    #   docker/tools/{compose,start,stop,rm}.ts — tier 1/2, confirm-gated
+    #   src/ for a compose project view; real remediation-action buttons
+    #   in the investigation report, once there's something safe for them to call
 
   docs/
     design/
@@ -473,6 +479,23 @@ before the next is started:
    stale bars on screen — not a bug to fix, an expected case to display.
 3. **Investigation flow** — `prompt` round trip producing an investigation
    report resource.
+   **Status: done.** Added `build-investigation-report` — a model-facing
+   tool that takes structured findings (`subject`, `summary`, `rootCause`,
+   `timeline`, `evidence`, `suggestedRemediations`) and renders them as
+   the new `investigation-report.html` resource. It's deliberately dumb:
+   it gathers nothing itself, just turns the agent's own findings into UI,
+   exactly matching §7.2's point that the agent — not the server — owns
+   the reasoning. Both "Investigate" buttons (Stage 0's disk-usage one,
+   Stage 1's per-container one) now end their prompt by telling the agent
+   to call this tool with what it found, instead of just replying in
+   chat. One thing this surfaced that the original §5 item 3 wording
+   glossed over: "suggested remediation actions, each rendered as its own
+   confirm-gated tool-call button" isn't buildable yet, because the
+   confirm-gated mutating tools those buttons would call don't exist
+   until item 4. `suggestedRemediations` is plain text for now, and both
+   Investigate prompts now explicitly tell the agent not to take any
+   action on its own — only report and suggest. Wiring real buttons is
+   item 4's job once there's something safe for them to call.
 4. **Gated mutating actions** — tier 1/2 with confirms wired in.
 5. *(optional)* **Sidecar streaming** for true live logs/stats.
 

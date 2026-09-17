@@ -183,6 +183,23 @@ const ContainerStatsSchema = z.object({
   pids: z.number(),
 });
 
+const InvestigationReportSchema = z.object({
+  subject: z.string().describe("What's being investigated, e.g. a container or host resource name"),
+  summary: z.string().describe("One-paragraph summary of the investigation"),
+  rootCause: z.string().describe("The most likely root cause, stated plainly"),
+  timeline: z
+    .array(z.object({ timestamp: z.string(), event: z.string() }))
+    .describe("Chronological events that support the root-cause finding"),
+  evidence: z
+    .array(z.object({ source: z.string(), excerpt: z.string() }))
+    .describe("Raw data backing the finding, tagged by where it came from (e.g. 'docker-logs', 'du -sh')"),
+  suggestedRemediations: z
+    .array(z.string())
+    .describe(
+      "Plain-text remediation suggestions — informational only, not yet wired to actions (design doc §11 item 4)",
+    ),
+});
+
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "docker-skill Stage-0 spike: local system card",
@@ -367,6 +384,47 @@ export function createServer(): McpServer {
     dashboardUri,
     "docker-dashboard.html",
     "Docker Fleet Dashboard UI",
+  );
+
+  // ===========================================================================
+  // Stage 3 (design doc §11 item 3): investigation-report resource.
+  // Not read data itself — this tool just renders findings the *agent*
+  // already gathered (via docker-logs/docker-inspect/docker-stats or Bash)
+  // into a structured resource, instead of the agent's answer landing as
+  // an ordinary chat reply. See §7.2: the agent owns the reasoning, the
+  // server only owns turning the result into UI.
+  // ===========================================================================
+
+  const reportUri = "ui://investigation-report/investigation-report.html";
+
+  registerAppTool(
+    server,
+    "build-investigation-report",
+    {
+      title: "Build Investigation Report",
+      description:
+        "Renders investigation findings (root cause, timeline, evidence, " +
+        "suggested remediation) as a structured report UI. Call this after " +
+        "actually investigating something — via docker-logs/docker-inspect/" +
+        "docker-stats or Bash — not before. This tool does not gather any " +
+        "data itself.",
+      inputSchema: InvestigationReportSchema,
+      outputSchema: InvestigationReportSchema,
+      _meta: { ui: { resourceUri: reportUri } },
+    },
+    async (report): Promise<CallToolResult> => {
+      return {
+        content: [{ type: "text", text: JSON.stringify(report) }],
+        structuredContent: report,
+      };
+    },
+  );
+
+  registerHtmlResource(
+    server,
+    reportUri,
+    "investigation-report.html",
+    "Investigation Report UI",
   );
 
   return server;

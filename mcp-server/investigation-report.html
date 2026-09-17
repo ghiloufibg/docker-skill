@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Investigation Report</title>
+</head>
+<body>
+  <main class="main">
+    <header class="header">
+      <h1 id="report-subject" class="title">Investigation Report</h1>
+    </header>
+
+    <section class="summary-section">
+      <p id="report-summary" class="summary-text">--</p>
+    </section>
+
+    <section class="root-cause-section">
+      <h2 class="section-title">Root cause</h2>
+      <div id="root-cause" class="root-cause-box">--</div>
+    </section>
+
+    <section class="timeline-section">
+      <h2 class="section-title">Timeline</h2>
+      <ol id="timeline-list" class="timeline-list"></ol>
+    </section>
+
+    <section class="evidence-section">
+      <h2 class="section-title">Evidence</h2>
+      <div id="evidence-list" class="evidence-list"></div>
+    </section>
+
+    <section class="remediation-section">
+      <h2 class="section-title">Suggested remediation</h2>
+      <ul id="remediation-list" class="remediation-list"></ul>
+      <p class="remediation-note">
+        Informational only for now — none of these are one-click actions yet.
+        See design doc §11 item 4.
+      </p>
+    </section>
+  </main>
+
+  <script type="module" src="./src/investigation-report.ts"></script>
+</body>
+</html>

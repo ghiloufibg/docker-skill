@@ -174,7 +174,11 @@ investigateBtn.addEventListener("click", async () => {
     `Disk usage on ${diskPath} looks high. Investigate what's consuming ` +
     `space on this machine (du/df are fine to use) and, if ${repoPath} is ` +
     `relevant, check whether build artifacts or git history there are a ` +
-    `contributing factor. Summarize findings and suggest what's safe to clean up.`;
+    `contributing factor. Once you've actually looked, call this server's ` +
+    `build-investigation-report tool with your findings (subject "Disk ` +
+    `usage on ${diskPath}") instead of just replying in chat — root cause, ` +
+    `the commands/output you based it on as evidence, and what's safe to ` +
+    `clean up as suggested remediation.`;
   investigateBtn.setAttribute("disabled", "true");
   try {
     const { isError } = await app.sendMessage(

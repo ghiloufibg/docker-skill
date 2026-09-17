@@ -9,9 +9,10 @@
     "docker-skill-mcp-server": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json && cross-env INPUT=mcp-app.html vite build && cross-env INPUT=docker-dashboard.html vite build && tsc -p tsconfig.server.json",
+    "build": "tsc --noEmit -p tsconfig.json && cross-env INPUT=mcp-app.html vite build && cross-env INPUT=docker-dashboard.html vite build && cross-env INPUT=investigation-report.html vite build && tsc -p tsconfig.server.json",
     "watch:app": "cross-env INPUT=mcp-app.html vite build --watch",
     "watch:dashboard": "cross-env INPUT=docker-dashboard.html vite build --watch",
+    "watch:report": "cross-env INPUT=investigation-report.html vite build --watch",
     "start:stdio": "node dist/index.js --stdio",
     "smoke": "npm run build 1>&2 && node dist/test/smoke.js"
   },
