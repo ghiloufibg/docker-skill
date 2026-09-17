@@ -173,6 +173,24 @@ Stage-0 spike (§13) rather than deciding today; the spike is exactly
 where "does this kit's happy path actually work against the host I'm
 targeting" gets answered.
 
+**Resolved by the Stage-0 build (see §13 status):** went with the
+official MCP Apps SDK, specifically `@modelcontextprotocol/ext-apps@^2.0.0`
+paired with `@modelcontextprotocol/server@2.0.0` (the current split-package
+SDK generation — *not* the older `@modelcontextprotocol/sdk` monolith;
+`ext-apps@1.7.5` targets that older generation and was considered, but the
+official examples and current docs are all on the v2 generation, so
+that's what this repo builds against). `mcp-ui` was evaluated but not
+used: its own supported-hosts table doesn't list Claude at all, while
+`ext-apps`'s README links directly to `claude.com/docs/connectors/
+building/mcp-apps/getting-started` — a much stronger signal for a
+Claude-targeted skill. One concrete cost worth carrying forward: the
+`App` class + its dependencies (including zod, pulled in transitively)
+inline to **~240 KB of HTML per resource response** (measured, not
+estimated — see `mcp-server/test/smoke.ts` output). That's the price of
+not hand-rolling the protocol layer; §6.1's "keep the view layer small"
+guidance is partly there to keep the *other* half of the payload from
+also growing.
+
 **Important open risk, not yet resolved as of this writing (Sept
 2026):** public reporting says MCP Apps rendering is live in Claude
 Desktop, claude.ai, Claude Cowork, VS Code Copilot, and a few other
@@ -345,40 +363,39 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
   iframe sandboxing and tool-tier confirms above matter more here than
   network-level auth would.
 
-## 10. Package layout (for the implementation phase — not created yet)
+## 10. Package layout
+
+The Stage-0 layout below is what actually exists in this repo today, not
+a projection. Docker-specific pieces (the `docker/` tool handlers,
+`dashboard.html`, `investigation-report.html`, etc.) are still future
+work for Stage 1+ and aren't created yet — everything else here is real:
 
 ```
-docker-ops-skill/
-  SKILL.md
+docker-skill/                (repo root)
+  SKILL.md                   # implemented — Stage-0 usage + "how to continue" notes
   mcp-server/
-    package.json          # deps: @modelcontextprotocol/sdk, dockerode,
-                           # and whichever kit §6.0 settles on
-                           # (mcp-ui's @mcp-ui/server, or the official
-                           # MCP Apps SDK once it's the better fit)
+    package.json              # @modelcontextprotocol/ext-apps ^2.0.0,
+                               # @modelcontextprotocol/server 2.0.0, zod ^4
+    tsconfig.json              # client-side (src/), DOM lib, noEmit — type-checked by Vite's build
+    tsconfig.server.json       # server-side (server.ts, index.ts, test/), Node lib, emits dist/
+    vite.config.ts             # vite-plugin-singlefile: bundles src/mcp-app.ts + css into one inlined HTML
+    server.ts                  # tool registration: system-info (model-facing), system-poll (app-only)
+    index.ts                   # entrypoint — StdioServerTransport only, no HTTP (§1)
+    mcp-app.html                # shell referencing ./src/mcp-app.ts as a module
     src/
-      index.ts
-      docker/
-        client.ts
-        tools/
-          ps.ts
-          logs.ts
-          inspect.ts
-          stats.ts
-          compose.ts
-          investigate.ts
-      ui/
-        resources.ts       # wraps the kit's resource-builder (createUIResource
-                            # or equivalent) — not a hand-rolled envelope
-        templates/
-          dashboard.html
-          container-detail.html
-          investigation-report.html
-        assets/
-          app.js            # wraps the kit's client-side action dispatch (§6)
-          app.css
+      mcp-app.ts                # the App instance: ontoolresult, callServerTool, sendMessage (§6.0/§7)
+      mcp-app.css                # plain CSS, light/dark via prefers-color-scheme (§6.1)
+    test/
+      smoke.ts                  # headless verification over real stdio MCP protocol (§13 status)
+    dist/                       # build output (gitignored) — index.js, server.js, mcp-app.html
+
+    # Stage 1+ (not yet created):
+    #   docker/{client.ts, tools/{ps,logs,inspect,stats,compose,investigate}.ts}
+    #   src/templates or additional mcp-app-*.html for dashboard/detail/investigation-report views
+
   docs/
     design/
-      mcp-ui-docker-ops.md   <- this file
+      mcp-ui-docker-ops.md      <- this file
 ```
 
 ## 11. Staged validation plan
@@ -392,6 +409,12 @@ before the next is started:
    something low-stakes** (see §13 for the recommended target) using one
    of the kits from §6.0 — confirm resources render and both `tool` and
    `prompt` actions round-trip.
+   **Status: half done.** The server/protocol half is built and passes
+   its own headless verification (`mcp-server/test/smoke.ts` — real
+   stdio MCP protocol, correct `text/html;profile=mcp-app` resource,
+   both tools callable). The host-rendering half — does it actually draw
+   the iframe and round-trip a click — is still unverified; that needs a
+   host known to support MCP Apps, per §12.
 1. **Read-only dashboard** — `docker.ps` + `docker.inspect`, manual
    refresh only.
 2. **Logs + stats views**, still read-only, charts per the `dataviz` skill.
@@ -447,3 +470,14 @@ without touching anything privileged or leaving the machine. Once that's
 proven, the Docker dashboard is a straightforward re-skin with a real
 permission model layered on top per §9 — still entirely local, per the
 deployment model in §1.
+
+**Status: built.** `mcp-server/` implements exactly this — `system-info`
+(hostname/CPU/memory/disk/git, one repo not "a couple," to keep the spike
+small) and `system-poll` for the Refresh button, plus the disk-over-80%
+"Investigate" button wired to `app.sendMessage`. `npm run smoke` in
+`mcp-server/` proves the resource rendering and tool round trip at the
+protocol level (see §6.0 for the resolved kit choice and measured
+payload size). It does **not** yet prove the prompt round trip actually
+reaches a live agent conversation, or that any host draws the iframe —
+both require a real host session, not a headless script. See `SKILL.md`
+at the repo root for how to run it and what's still open.
