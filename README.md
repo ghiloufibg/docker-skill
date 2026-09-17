@@ -38,6 +38,15 @@ it creates a disposable container, drives it through
 pause→unpause→restart→kill→start→stop→rm via the real tools, confirms
 each state transition and that it's actually gone afterward, then cleans
 up. It also confirms all three returned resources match the official MCP
-Apps shape (`text/html;profile=mcp-app`). That's verified. **Whether the
-UI actually *renders* in the Claude Code CLI is not** — see the design
-doc §12 and `SKILL.md` for why, and what to check before going further.
+Apps shape (`text/html;profile=mcp-app`).
+
+**Rendering is now verified too — not just the protocol.** All three UI
+resources were checked end-to-end against the official
+`modelcontextprotocol/ext-apps` reference host, driven with Playwright:
+tool calls, resource rendering, tabs, state-aware action buttons, and
+the Tier 2 confirm dialog all genuinely work. That check also caught and
+fixed two real CSS bugs invisible to the headless smoke test (elements
+that stayed visible despite `hidden` being set). **What's still open is
+the Claude Code CLI specifically** — the reference host isn't Claude
+Code — see the design doc §12 and `SKILL.md` for the full picture and
+what to check next.

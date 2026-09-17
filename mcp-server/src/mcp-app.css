@@ -159,6 +159,14 @@ body {
   gap: 8px;
 }
 
+/* Same class of bug as .confirm-overlay in docker-dashboard.css: an author
+   `display` rule beats the UA default `[hidden] { display: none }`, so this
+   box was rendering even when disk usage was nowhere near the 80% threshold.
+   Found only by actually rendering the page against a real host. */
+.investigate-section[hidden] {
+  display: none;
+}
+
 .investigate-text {
   margin: 0;
   font-size: 13px;

@@ -449,12 +449,18 @@ before the next is started:
    something low-stakes** (see §13 for the recommended target) using one
    of the kits from §6.0 — confirm resources render and both `tool` and
    `prompt` actions round-trip.
-   **Status: half done.** The server/protocol half is built and passes
-   its own headless verification (`mcp-server/test/smoke.ts` — real
-   stdio MCP protocol, correct `text/html;profile=mcp-app` resource,
-   both tools callable). The host-rendering half — does it actually draw
-   the iframe and round-trip a click — is still unverified; that needs a
-   host known to support MCP Apps, per §12.
+   **Status: done, for the mechanism; still open for the specific
+   target host.** The server/protocol half passes its own headless
+   verification (`mcp-server/test/smoke.ts`). The host-rendering half —
+   does it actually draw the iframe and round-trip a click — is now
+   verified too, against `modelcontextprotocol/ext-apps`'s own reference
+   host (`examples/basic-host`), driven with Playwright: all three
+   resources render, tool calls round-trip, and the Stage 4 confirm
+   dialog works end-to-end. Full account, including two real bugs this
+   check found and fixed, is in §12. What that check can't answer is
+   whether the Claude Code CLI specifically renders this — `basic-host`
+   is a reference implementation, not Claude Code — so that half of §12's
+   question stays open.
 1. **Read-only dashboard** — `docker.ps` + `docker.inspect`, manual
    refresh only.
    **Status: done.** Implemented as `docker-ps` / `docker-inspect` (hyphenated,
@@ -550,26 +556,54 @@ before the next is started:
 ## 12. Open questions / risks
 
 - **Does the actual target host render MCP Apps UI resources at all?**
-  Updated per §6.0: this is no longer "does some hypothetical MCP-UI
-  technique exist" (it does, as the official MCP Apps extension) but
-  "does *this* host implement it." As of this writing, public reporting
-  places Claude Desktop, claude.ai, Claude Cowork, and VS Code Copilot
-  as supporting it, and specifically calls out the **Claude Code CLI as
-  not yet supporting it**. This is still the single biggest risk to the
-  whole idea and must be re-verified (not just re-read from this doc)
-  immediately before Stage 0, since it can change at any release.
-- Given that gap, which surface is actually being targeted — the CLI
-  (today's `docker-skill` context), or Desktop/claude.ai/Cowork where
-  rendering is reportedly already live? The answer changes where the
-  Stage-0 spike should even run.
+  **Resolved at the mechanism level — the technique itself genuinely
+  works.** Ran the real `mcp-server` (unmodified, just given a temporary
+  loopback-only HTTP transport instead of stdio, since the reference
+  host connects over Streamable HTTP) against
+  `modelcontextprotocol/ext-apps`'s own reference host implementation
+  (`examples/basic-host`), driven headlessly with Playwright/Chromium
+  (already available in this environment). All three UI resources
+  render correctly inside the host's double-iframe sandbox: the system
+  card (disk/memory bars, git status), the Docker dashboard (card grid,
+  click-through to a tabbed detail panel, state-aware Tier 1/2 action
+  buttons, the type-to-confirm dialog), and the investigation report
+  (timeline, evidence, root cause). Full tool-call round trips, resource
+  re-rendering, and host-context/theme sync all worked as designed.
+  **What this does *not* answer:** whether the Claude Code CLI
+  specifically renders it — `basic-host` is a reference/test
+  implementation, not Claude Code. That half of the original question
+  is still open; re-check `code.claude.com/docs/en/changelog` before
+  assuming either way, per the guidance elsewhere in this doc.
+- **Two real bugs were only found because this rendering check
+  happened at all** — the headless `smoke.ts` test is blind to them by
+  construction, since it never renders CSS. Both were the same class of
+  mistake: `.confirm-overlay` and `.investigate-section` each set their
+  own `display: flex` unconditionally, and — because an author stylesheet
+  rule beats the browser's default `[hidden] { display: none }` at equal
+  CSS specificity — both elements stayed visible even while their
+  `hidden` attribute was set (an empty confirm modal permanently
+  floating over the dashboard; an empty "Investigate" box on a system
+  card at 23% disk usage, nowhere near the 80% threshold). Fixed with an
+  explicit `.classname[hidden] { display: none; }` override on each.
+  **General lesson for any future `hidden`-toggled element in this
+  project:** if its class sets `display` in CSS, it needs this override
+  too — grep for `hidden` in the HTML against `display:` in the
+  corresponding CSS before assuming a new toggle works.
 - How does the host reconcile a `prompt` message arriving mid-turn (is it
   queued as the next turn, or does it interrupt)? Affects whether
-  "Investigate" buttons feel responsive.
+  "Investigate" buttons feel responsive. Not answered by the basic-host
+  check above — that reference host has no live agent turn to interrupt.
 - What's the resource size/latency budget for a re-rendered iframe on
   every tier-0 tool call — is polling actually usable, or does each
-  refresh cause a visible flash/reload?
+  refresh cause a visible flash/reload? The manual-refresh flows above
+  felt instant against a local reference host; this doesn't test
+  networked/production hosts or the phase-2 streaming sidecar's needs.
 - Does the host give any origin/identity guarantee for postMessage
-  events we can rely on, or is that entirely our own validation to build?
+  events we can rely on, or is that entirely our own validation to
+  build? `basic-host`'s sandbox proxy (a separate origin, port 8081)
+  does validate and relay — see its `src/sandbox.ts` — but that's this
+  one reference implementation's choice, not a spec guarantee every
+  host is required to make.
 
 ## 13. Recommended first spike (better test use case for Stage 0)
 

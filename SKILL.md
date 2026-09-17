@@ -119,24 +119,50 @@ client's MCP config):
 }
 ```
 
-## The one thing this hasn't proven yet
+## Rendering: proven for the mechanism, still open for Claude Code CLI
 
-Whether the *rendering* actually happens is unverified — `docs/design/
-mcp-ui-docker-ops.md` §12 flags that public reporting places MCP Apps
-rendering as live in Claude Desktop/claude.ai/Cowork/VS Code Copilot but
-**not confirmed for the Claude Code CLI** as of Sept 2026. If you're
-picking this work back up: re-check `code.claude.com/docs/en/changelog`
-first, then register the server above in whichever host is confirmed to
-support it and open `system-info` or `docker-ps` to see if the card
-renders — and, since real mutating tools now exist, be deliberate about
-which host/environment you test Tier 2 actions against; this was all
-verified against disposable local test containers on purpose.
+**Update:** the rendering question is no longer fully open. All three UI
+resources were verified end-to-end against `modelcontextprotocol/ext-apps`'s
+own reference host (`examples/basic-host`), driven headlessly with
+Playwright — tool calls, resource rendering, tab switching, state-aware
+Tier 1/2 buttons, and the type-to-confirm dialog all genuinely work. Two
+real CSS bugs were found and fixed in the process (details in design doc
+§12) — both were elements that stayed visible despite `hidden` being set,
+because their class also set `display` unconditionally, which beats the
+browser's default `[hidden]` rule. If you add a new `hidden`-toggled
+element to any of the three widgets, check its CSS for the same trap.
+
+**What's still unconfirmed:** whether the **Claude Code CLI** specifically
+renders this — `basic-host` is a reference/test implementation, not
+Claude Code, so that question needs a real Claude Code session, not this
+harness. If you're picking that up: re-check
+`code.claude.com/docs/en/changelog` first, then register the server
+(above) directly in a Claude Code session and open `system-info` or
+`docker-ps` to see if it renders — and, since real mutating tools exist,
+be deliberate about which environment you test Tier 2 actions against;
+everything so far was verified against disposable local test containers
+on purpose.
+
+**How the basic-host check was done, if you need to repeat it:** it is
+*not* part of this repo (the shipped server is stdio-only, no HTTP, per
+§1 — this was a temporary exception just for the check). Clone
+`modelcontextprotocol/ext-apps`, copy `examples/basic-host` to a
+directory *outside* that repo (its own `npm install` fights the
+monorepo's workspace/build scripts otherwise), `npm install` there, then
+give this server a throwaway loopback HTTP transport (wrap
+`createServer()` from `server.ts` with `NodeStreamableHTTPServerTransport`
+from `@modelcontextprotocol/node`, bound to `127.0.0.1` — mirror
+`main.ts` in any of the ext-apps examples) so `basic-host` has something
+to connect to at `http://127.0.0.1:3001/mcp`. Delete that transport file
+afterward; it must never be committed.
 
 ## If asked to continue this work
 
-- **"Does the UI render?"** — register the server (above) in a host known
-  to support MCP Apps, call `system-info` or `docker-ps`, and report what
-  you see (or don't).
+- **"Does the UI render?"** — the mechanism itself is proven (see above);
+  what's still open is Claude Code CLI specifically. Register the server
+  (above) directly in a Claude Code session, call `system-info` or
+  `docker-ps`, and report what you actually see (or don't) — don't
+  re-answer this from `basic-host`'s result, which doesn't cover the CLI.
 - **"Continue to Stage 5"** (optional, design doc §11 item 5) — a
   loopback/Unix-socket-only streaming sidecar for true live logs/stats,
   per §8 phase 2. Not required; the core plan is done without it.
