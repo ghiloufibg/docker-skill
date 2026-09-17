@@ -34,6 +34,20 @@ interface ContainerDetail {
   ports: string[];
 }
 
+interface ContainerLogs {
+  lines: string[];
+}
+
+interface ContainerStats {
+  cpuPercent: number;
+  memUsageBytes: number;
+  memLimitBytes: number;
+  memPercent: number;
+  netRxBytes: number;
+  netTxBytes: number;
+  pids: number;
+}
+
 const mainEl = document.querySelector(".main") as HTMLElement;
 const refreshBtn = document.getElementById("refresh-btn")!;
 const cardList = document.getElementById("card-list")!;
@@ -42,6 +56,45 @@ const detailPanel = document.getElementById("detail-panel")!;
 const detailTitle = document.getElementById("detail-title")!;
 const detailBody = document.getElementById("detail-body")!;
 const detailCloseBtn = document.getElementById("detail-close-btn")!;
+const tabBtns = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab-btn"));
+const tabPanels: Record<string, HTMLElement> = {
+  inspect: document.getElementById("tab-inspect")!,
+  logs: document.getElementById("tab-logs")!,
+  stats: document.getElementById("tab-stats")!,
+};
+const logsRefreshBtn = document.getElementById("logs-refresh-btn")!;
+const logsContent = document.getElementById("logs-content")!;
+const statsRefreshBtn = document.getElementById("stats-refresh-btn")!;
+const statsCpuPercent = document.getElementById("stats-cpu-percent")!;
+const statsCpuBar = document.getElementById("stats-cpu-bar")!;
+const statsMemPercent = document.getElementById("stats-mem-percent")!;
+const statsMemBar = document.getElementById("stats-mem-bar")!;
+const statsMemDetail = document.getElementById("stats-mem-detail")!;
+const statsNetRx = document.getElementById("stats-net-rx")!;
+const statsNetTx = document.getElementById("stats-net-tx")!;
+const statsPids = document.getElementById("stats-pids")!;
+const statsStatus = document.getElementById("stats-status")!;
+
+let currentContainerId: string | null = null;
+
+function formatBytes(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function setBar(fillEl: HTMLElement, percentEl: HTMLElement, percent: number): void {
+  fillEl.style.width = `${Math.min(percent, 100)}%`;
+  fillEl.classList.remove("warning", "danger");
+  if (percent >= 90) fillEl.classList.add("danger");
+  else if (percent >= 70) fillEl.classList.add("warning");
+  percentEl.textContent = `${percent}%`;
+}
 
 function stateClass(state: string): string {
   if (state === "running") return "state-running";
@@ -108,6 +161,10 @@ function renderDetail(d: ContainerDetail): void {
 }
 
 async function openDetail(id: string): Promise<void> {
+  currentContainerId = id;
+  logsContent.textContent = "--";
+  resetStatsDisplay();
+  switchTab("inspect");
   try {
     const result = await app.callServerTool({ name: "docker-inspect", arguments: { id } });
     renderDetail(result.structuredContent as unknown as ContainerDetail);
@@ -118,7 +175,80 @@ async function openDetail(id: string): Promise<void> {
 
 detailCloseBtn.addEventListener("click", () => {
   detailPanel.hidden = true;
+  currentContainerId = null;
 });
+
+// =============================================================================
+// Tabs — Logs and Stats are lazy-loaded on first switch, per design doc §5
+// item 2 ("Container detail — tabs for Logs / Stats / Inspect / Actions").
+// =============================================================================
+
+function switchTab(tab: string): void {
+  for (const btn of tabBtns) {
+    btn.classList.toggle("active", btn.dataset.tab === tab);
+  }
+  for (const [name, panel] of Object.entries(tabPanels)) {
+    panel.hidden = name !== tab;
+  }
+  if (tab === "logs") loadLogs();
+  if (tab === "stats") loadStats();
+}
+
+for (const btn of tabBtns) {
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab!));
+}
+
+async function loadLogs(): Promise<void> {
+  if (!currentContainerId) return;
+  logsContent.textContent = "Loading...";
+  try {
+    const result = await app.callServerTool({
+      name: "docker-logs",
+      arguments: { id: currentContainerId, tail: 100 },
+    });
+    const { lines } = result.structuredContent as unknown as ContainerLogs;
+    logsContent.textContent = lines.length > 0 ? lines.join("\n") : "(no log output)";
+  } catch (e) {
+    console.error("docker-logs failed:", e);
+    logsContent.textContent = "[ERROR fetching logs]";
+  }
+}
+logsRefreshBtn.addEventListener("click", loadLogs);
+
+function resetStatsDisplay(): void {
+  setBar(statsCpuBar, statsCpuPercent, 0);
+  setBar(statsMemBar, statsMemPercent, 0);
+  statsMemDetail.textContent = "-- / --";
+  statsNetRx.textContent = "--";
+  statsNetTx.textContent = "--";
+  statsPids.textContent = "--";
+  statsStatus.hidden = true;
+}
+
+async function loadStats(): Promise<void> {
+  if (!currentContainerId) return;
+  statsStatus.hidden = true;
+  try {
+    const result = await app.callServerTool({ name: "docker-stats", arguments: { id: currentContainerId } });
+    if (result.isError) throw new Error("tool returned an error");
+    const stats = result.structuredContent as unknown as ContainerStats;
+    setBar(statsCpuBar, statsCpuPercent, stats.cpuPercent);
+    setBar(statsMemBar, statsMemPercent, stats.memPercent);
+    statsMemDetail.textContent = `${formatBytes(stats.memUsageBytes)} / ${formatBytes(stats.memLimitBytes)}`;
+    statsNetRx.textContent = formatBytes(stats.netRxBytes);
+    statsNetTx.textContent = formatBytes(stats.netTxBytes);
+    statsPids.textContent = String(stats.pids);
+  } catch (e) {
+    // Expected for a stopped container — Docker's stats endpoint only
+    // works on running ones. Not a bug, so surface it plainly rather
+    // than leaving stale/misleading bars on screen.
+    console.error("docker-stats failed:", e);
+    resetStatsDisplay();
+    statsStatus.textContent = "Stats unavailable (container not running?)";
+    statsStatus.hidden = false;
+  }
+}
+statsRefreshBtn.addEventListener("click", loadStats);
 
 // =============================================================================
 // MCP App
@@ -152,7 +282,9 @@ async function investigate(c: ContainerSummary): Promise<void> {
   const prompt =
     `Container "${c.name}" (image ${c.image}) is not running ` +
     `(state: ${c.state}, status: ${c.status}${c.exitCode !== null ? `, exit code ${c.exitCode}` : ""}). ` +
-    `Investigate why using \`docker logs ${c.name}\` and \`docker inspect ${c.name}\` ` +
+    `Investigate why — prefer this server's docker-logs and docker-inspect ` +
+    `tools if you have them (container id "${c.id}"), otherwise fall back ` +
+    `to \`docker logs ${c.name}\` / \`docker inspect ${c.name}\` via Bash — ` +
     `and summarize the likely root cause.`;
   try {
     const { isError } = await app.sendMessage(

@@ -16,6 +16,8 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { listContainers } from "./docker/tools/ps.js";
 import { inspectContainer } from "./docker/tools/inspect.js";
+import { getContainerLogs } from "./docker/tools/logs.js";
+import { getContainerStats } from "./docker/tools/stats.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -171,6 +173,16 @@ const ContainerDetailSchema = z.object({
   ports: z.array(z.string()),
 });
 
+const ContainerStatsSchema = z.object({
+  cpuPercent: z.number(),
+  memUsageBytes: z.number(),
+  memLimitBytes: z.number(),
+  memPercent: z.number(),
+  netRxBytes: z.number(),
+  netTxBytes: z.number(),
+  pids: z.number(),
+});
+
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "docker-skill Stage-0 spike: local system card",
@@ -295,6 +307,57 @@ export function createServer(): McpServer {
       return {
         content: [{ type: "text", text: JSON.stringify(detail) }],
         structuredContent: detail,
+      };
+    },
+  );
+
+  // ===========================================================================
+  // Stage 2 (design doc §11 item 2): logs + stats, still read-only Tier 0.
+  // Both are model-facing (not app-only) per the §4 tier table.
+  // ===========================================================================
+
+  registerAppTool(
+    server,
+    "docker-logs",
+    {
+      title: "Get Container Logs",
+      description:
+        "Tail of a container's stdout/stderr (default last 100 lines). " +
+        "Read-only, local socket only.",
+      inputSchema: z.object({
+        id: z.string().describe("Container ID or name"),
+        tail: z.number().int().positive().optional().describe("Number of lines to tail (default 100)"),
+      }),
+      outputSchema: z.object({ lines: z.array(z.string()) }),
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ id, tail }): Promise<CallToolResult> => {
+      const lines = await getContainerLogs(id, tail);
+      const payload = { lines };
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload) }],
+        structuredContent: payload,
+      };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "docker-stats",
+    {
+      title: "Get Container Stats",
+      description:
+        "One-shot CPU/memory/network snapshot for a single container. " +
+        "Read-only, local socket only.",
+      inputSchema: z.object({ id: z.string().describe("Container ID or name") }),
+      outputSchema: ContainerStatsSchema,
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ id }): Promise<CallToolResult> => {
+      const stats = await getContainerStats(id);
+      return {
+        content: [{ type: "text", text: JSON.stringify(stats) }],
+        structuredContent: stats,
       };
     },
   );

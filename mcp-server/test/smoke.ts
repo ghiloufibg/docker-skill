@@ -101,6 +101,36 @@ async function main() {
       const dashboardTool = tools.find((t) => t.name === "docker-ps")!;
       const dashboardUri = (dashboardTool._meta as any)?.ui?.resourceUri;
       await assertHtmlResource(client, dashboardUri);
+
+      // =========================================================================
+      // Stage 2 (design doc §11 item 2): docker-logs / docker-stats.
+      // =========================================================================
+      assert(toolNames.includes("docker-logs"), "docker-logs tool must be registered");
+      assert(toolNames.includes("docker-stats"), "docker-stats tool must be registered");
+
+      const exited = containers.find((c: any) => c.state === "exited");
+      if (exited) {
+        const logsResult = await client.callTool({ name: "docker-logs", arguments: { id: exited.id, tail: 50 } });
+        assert(!logsResult.isError, "docker-logs call must not error");
+        const { lines } = logsResult.structuredContent as any;
+        console.log(`docker-logs for ${exited.name}:`, lines);
+        assert(Array.isArray(lines), "logs lines must be an array");
+        assert(lines.length > 0, "expected at least one log line from the exited test container");
+      } else {
+        console.warn("no exited container found — skipping docker-logs content check");
+      }
+
+      const running = containers.find((c: any) => c.state === "running");
+      if (running) {
+        const statsResult = await client.callTool({ name: "docker-stats", arguments: { id: running.id } });
+        assert(!statsResult.isError, "docker-stats call must not error for a running container");
+        const stats = statsResult.structuredContent as any;
+        console.log(`docker-stats for ${running.name}:`, JSON.stringify(stats, null, 2));
+        assert(typeof stats.cpuPercent === "number" && stats.cpuPercent >= 0, "cpuPercent must be a non-negative number");
+        assert(typeof stats.memUsageBytes === "number" && stats.memUsageBytes > 0, "memUsageBytes must be positive");
+      } else {
+        console.warn("no running container found — skipping docker-stats check");
+      }
     }
   }
 

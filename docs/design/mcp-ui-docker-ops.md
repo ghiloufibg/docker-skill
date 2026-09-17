@@ -386,27 +386,31 @@ docker-skill/                (repo root)
     tsconfig.server.json       # server-side (server.ts, index.ts, docker/, test/), Node lib, emits dist/
     vite.config.ts             # vite-plugin-singlefile: bundles each entrypoint into one inlined HTML
     server.ts                  # tool registration: system-info/system-poll (Stage 0),
-                                # docker-ps/docker-inspect (Stage 1)
+                                # docker-ps/docker-inspect (Stage 1),
+                                # docker-logs/docker-stats (Stage 2)
     index.ts                   # entrypoint — StdioServerTransport only, no HTTP (§1)
     docker/
       client.ts                 # dockerode wrapper, local socket only (§9)
       tools/
         ps.ts                    # listContainers() — backs docker-ps
         inspect.ts                # inspectContainer(id) — backs docker-inspect; env names only (§9)
+        logs.ts                   # getContainerLogs(id, tail) — backs docker-logs; hand-demuxes Docker's frame format
+        stats.ts                  # getContainerStats(id) — backs docker-stats; one-shot CPU/mem/net/pids
     mcp-app.html                # Stage 0 shell, referencing ./src/mcp-app.ts
-    docker-dashboard.html        # Stage 1 shell, referencing ./src/docker-dashboard.ts
+    docker-dashboard.html        # Stage 1/2 shell, referencing ./src/docker-dashboard.ts
     src/
       mcp-app.ts                # Stage 0 App instance: ontoolresult, callServerTool, sendMessage (§6.0/§7)
       mcp-app.css
-      docker-dashboard.ts        # Stage 1 App instance: card grid, click-through detail, investigate
+      docker-dashboard.ts        # Stage 1/2 App instance: card grid, tabbed detail panel
+                                  # (Inspect/Logs/Stats), investigate
       docker-dashboard.css
     test/
       smoke.ts                  # headless verification over real stdio MCP protocol (§13/§11 status)
     dist/                       # build output (gitignored)
 
-    # Stage 2+ (not yet created):
-    #   docker/tools/{logs,stats,compose,investigate}.ts
-    #   src/ templates for log viewer, stats charts, investigation-report, compose project view
+    # Stage 3+ (not yet created):
+    #   docker/tools/{compose,investigate}.ts
+    #   src/ templates for investigation-report resource, compose project view
 
   docs/
     design/
@@ -449,6 +453,24 @@ before the next is started:
    never values, since container env commonly carries secrets and this
    tool's output becomes part of the model's context — see §9.
 2. **Logs + stats views**, still read-only, charts per the `dataviz` skill.
+   **Status: done, with one deviation from the original plan.** `docker-logs`
+   (tail, default 100 lines) and `docker-stats` (one-shot CPU/mem/net/pids
+   snapshot) are implemented in `docker/tools/{logs,stats}.ts` and surfaced
+   as Inspect/Logs/Stats tabs inside the same detail panel added in Stage 1,
+   rather than as a separate "container detail" resource — the tab content
+   is fetched lazily per tab via `app.callServerTool`, matching §8's
+   manual-refresh MVP. The "stats charts" from §5 item 2 turned out not to
+   need charts at all for a one-shot (non-streaming) snapshot: it's just
+   the same disk/memory-style progress bars already established in Stage 0,
+   reused here for CPU%/Mem% — inline SVG sparklines would only earn their
+   place once Stage 5's streaming makes a *history* worth plotting. Two
+   implementation details worth carrying forward: (1) non-TTY container
+   logs come back from the Docker API in a multiplexed frame format
+   (8-byte header per frame) that has to be demuxed by hand — see the
+   comment in `logs.ts`; (2) `docker-stats` legitimately errors on a
+   stopped container (Docker's stats endpoint only works on running ones),
+   which the UI now surfaces as "Stats unavailable" rather than leaving
+   stale bars on screen — not a bug to fix, an expected case to display.
 3. **Investigation flow** — `prompt` round trip producing an investigation
    report resource.
 4. **Gated mutating actions** — tier 1/2 with confirms wired in.
