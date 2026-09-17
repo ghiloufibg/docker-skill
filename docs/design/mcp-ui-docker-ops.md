@@ -125,6 +125,71 @@ prompt.
 
 ## 6. UI rendering stack
 
+Split this into two layers, because they have different answers: the
+**wire protocol** (resource creation, iframe handshake, postMessage
+framing) should come from an existing kit, not be hand-rolled; the
+**view rendering** (what's actually drawn inside the iframe) stays
+vanilla, per the original reasoning below.
+
+### 6.0 Protocol layer: use the existing kit, don't hand-roll it
+
+What this doc was calling "the `ui://` resource + postMessage
+convention" in §2/§7 is, as of early 2026, an actual spec extension —
+**MCP Apps** (`modelcontextprotocol.io/extensions/apps`) — not a
+bespoke convention to invent from scratch. It formalizes exactly what
+§2 sketched: a tool's `_meta.ui.resourceUri` points at an HTML resource
+served with mime type `text/html;profile=mcp-app`, the host renders it
+in a sandboxed (double-nested) iframe, and the iframe talks back over
+**JSON-RPC over postMessage** — a stricter, better-specified wire format
+than the informal `{type, payload}` shape used in the sequence diagrams
+in §7 (those diagrams are conceptual — the actual framing should follow
+whichever SDK below is used, not be reimplemented by hand).
+
+Two concrete kits exist and should be used instead of writing this
+plumbing from scratch:
+
+- **[`mcp-ui`](https://github.com/idosal/mcp-ui)** (`@mcp-ui/server` +
+  `@mcp-ui/client` on npm, plus a `mcp-ui` package on PyPI) — the
+  community project that originated this pattern. Server side:
+  `createUIResource()` builds the resource (raw HTML, an external URL
+  iframe, or Shopify Remote DOM for host-styled components) in a few
+  lines instead of hand-assembling the resource envelope. Client side:
+  `<UIResourceRenderer />` (or a framework-agnostic web component) does
+  the iframe sandboxing and decodes actions (`tool`, `prompt`, `link`,
+  `intent`, `notify`) for you.
+- **The official MCP Apps SDK** (referenced from
+  `modelcontextprotocol.io/extensions/apps/build`) — the sanctioned
+  implementation of the now-standardized extension, built on top of
+  `@modelcontextprotocol/sdk`. Prefer this over `mcp-ui` once it's
+  stable enough for this use case, since it's the version Anthropic's
+  own surfaces are implementing against (see the support caveat below);
+  `mcp-ui` remains a reasonable fallback/reference if the official SDK
+  is still too rough at implementation time.
+
+Either kit removes exactly the class of bug visible in the wild right
+now — malformed CSP metadata, iframe handshakes that never complete —
+without us having to get the framing right by hand. Pick one during the
+Stage-0 spike (§13) rather than deciding today; the spike is exactly
+where "does this kit's happy path actually work against the host I'm
+targeting" gets answered.
+
+**Important open risk, not yet resolved as of this writing (Sept
+2026):** public reporting says MCP Apps rendering is live in Claude
+Desktop, claude.ai, Claude Cowork, VS Code Copilot, and a few other
+hosts — **but explicitly *not* in the Claude Code CLI itself.** The
+Claude Code changelog as of mid-September 2026 shows MCP-related fixes
+(disconnect handling, OAuth, tool search) but nothing indicating UI
+resource rendering landed. If the real target for this skill is "the
+Claude Code CLI on someone's Docker host," that target may not render
+any of this yet, which would mean either waiting, or aiming the Stage-0
+spike at Claude Desktop/claude.ai/Cowork instead to validate the
+technique while CLI support catches up. Re-check
+`code.claude.com/docs/en/changelog` immediately before starting Stage 0
+— this is the kind of thing that could easily have shipped between
+writing this doc and reading it.
+
+### 6.1 View rendering: still vanilla, no framework
+
 **Default: no framework — vanilla JS/DOM, hand-rolled inline SVG for
 charts, plain CSS.** This follows directly from constraints already set
 elsewhere in this doc, not from a general dislike of frameworks:
@@ -149,10 +214,11 @@ elsewhere in this doc, not from a general dislike of frameworks:
   inlined into every dashboard response for a handful of sparklines) —
   a bad trade either way for shapes this simple.
 - One small shared script (`assets/app.js` in §10) is reused — verbatim,
-  inlined — across every template. It is *not* a UI framework, just the
-  postMessage bridge: send a `tool`/`prompt` message, validate
-  `event.origin` on the way back, and a couple of DOM helpers (`h()`-style
-  element builders, event delegation for tier-gated confirm dialogs).
+  inlined — across every template. It is *not* a UI framework: it wraps
+  whichever kit was picked in §6.0 for dispatching `tool`/`prompt`
+  actions (so the wire framing stays kit-owned, not hand-rolled) plus a
+  couple of local DOM helpers (`h()`-style element builders, event
+  delegation for tier-gated confirm dialogs).
 
 **Escape hatch, not a default:** if the investigation-report view
 (§5, item 3) turns out to need real component composition once Stage 3 is built —
@@ -285,7 +351,10 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
 docker-ops-skill/
   SKILL.md
   mcp-server/
-    package.json
+    package.json          # deps: @modelcontextprotocol/sdk, dockerode,
+                           # and whichever kit §6.0 settles on
+                           # (mcp-ui's @mcp-ui/server, or the official
+                           # MCP Apps SDK once it's the better fit)
     src/
       index.ts
       docker/
@@ -298,13 +367,14 @@ docker-ops-skill/
           compose.ts
           investigate.ts
       ui/
-        resources.ts
+        resources.ts       # wraps the kit's resource-builder (createUIResource
+                            # or equivalent) — not a hand-rolled envelope
         templates/
           dashboard.html
           container-detail.html
           investigation-report.html
         assets/
-          app.js
+          app.js            # wraps the kit's client-side action dispatch (§6)
           app.css
   docs/
     design/
@@ -316,9 +386,12 @@ docker-ops-skill/
 Build (and validate) in this order — each stage should be provably working
 before the next is started:
 
-0. **Spike the plumbing on something low-stakes** (see §13 for the
-   recommended target) — confirm the host actually renders `ui://`
-   resources and round-trips both `tool` and `prompt` postMessages.
+0. **Confirm the target host renders MCP Apps at all** (§12) — check
+   `code.claude.com/docs/en/changelog` (or whichever host is actually in
+   play) *before* writing any code; then **spike the plumbing on
+   something low-stakes** (see §13 for the recommended target) using one
+   of the kits from §6.0 — confirm resources render and both `tool` and
+   `prompt` actions round-trip.
 1. **Read-only dashboard** — `docker.ps` + `docker.inspect`, manual
    refresh only.
 2. **Logs + stats views**, still read-only, charts per the `dataviz` skill.
@@ -329,10 +402,19 @@ before the next is started:
 
 ## 12. Open questions / risks
 
-- **Unconfirmed: does the Claude Code host currently render MCP-UI
-  resources and support the postMessage bridge at all?** This is the
-  single biggest risk to the whole idea and should be answered by the
-  Stage 0 spike before any Docker-specific code is written.
+- **Does the actual target host render MCP Apps UI resources at all?**
+  Updated per §6.0: this is no longer "does some hypothetical MCP-UI
+  technique exist" (it does, as the official MCP Apps extension) but
+  "does *this* host implement it." As of this writing, public reporting
+  places Claude Desktop, claude.ai, Claude Cowork, and VS Code Copilot
+  as supporting it, and specifically calls out the **Claude Code CLI as
+  not yet supporting it**. This is still the single biggest risk to the
+  whole idea and must be re-verified (not just re-read from this doc)
+  immediately before Stage 0, since it can change at any release.
+- Given that gap, which surface is actually being targeted — the CLI
+  (today's `docker-skill` context), or Desktop/claude.ai/Cowork where
+  rendering is reportedly already live? The answer changes where the
+  Stage-0 spike should even run.
 - How does the host reconcile a `prompt` message arriving mid-turn (is it
   queued as the next turn, or does it interrupt)? Affects whether
   "Investigate" buttons feel responsive.
