@@ -19,6 +19,24 @@ proving out the permission model. But it is not the best *first* test,
 because it also drags in Docker-socket security. See §12 for the
 recommended spike target instead.
 
+**Deployment model: single machine, no remote communication.** The agent,
+the MCP server, the Docker daemon, and the rendered UI all run on the same
+host. Concretely:
+
+- The MCP server is spawned as a **local subprocess of the Claude Code
+  host and speaks stdio**, not a network protocol (no HTTP/SSE server, no
+  listening socket for the MCP connection itself). There's nothing to
+  authenticate on that channel because it's never exposed off-box.
+- Docker is reached through the local `/var/run/docker.sock` only —
+  never a remote/TCP Docker context (already the case in §8, restated
+  here as a hard constraint, not just a v1 simplification).
+- If the phase-2 streaming sidecar (§7) is ever built, it binds to a Unix
+  domain socket or `127.0.0.1` only, and is treated as **local IPC, not a
+  network service** — no port forwarding, no binding to `0.0.0.0`, ever.
+- Every tool this skill exposes operates on local resources. Nothing in
+  scope calls out to a remote API, so the Stage-0 spike (§12) has to be
+  chosen accordingly.
+
 ## 2. Architecture
 
 ```mermaid
@@ -28,15 +46,15 @@ flowchart LR
         Iframe["Sandboxed iframe\n(rendered ui:// resource)"]
     end
 
-    subgraph Server["docker-ops MCP server (local process)"]
+    subgraph Server["docker-ops MCP server\n(local subprocess, stdio only)"]
         Tools["Tool handlers\n(ps, logs, inspect, stats, exec, ...)"]
         Resources["UI resource builder\n(HTML templates + data)"]
         DockerClient["Docker Engine API client"]
     end
 
-    Docker["Docker daemon\n(/var/run/docker.sock)"]
+    Docker["Docker daemon\n(local /var/run/docker.sock)"]
 
-    Agent <--> |MCP tool calls/results| Tools
+    Agent <--> |"MCP tool calls/results (stdio, same host)"| Tools
     Tools --> Resources
     Resources --> |ui:// resource in tool result| Agent
     Agent --> |render| Iframe
@@ -159,13 +177,17 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
 - **Polling** — UI JS calls the same `tool` message every N seconds. Only
   viable for tier-0 tools (no permission-prompt spam). Needs a visible
   "auto-refresh: on/off" toggle so it's not silently hammering the host.
-- **Phase 2: sidecar streaming** — the MCP server also opens a local
-  WebSocket/SSE endpoint (`ws://127.0.0.1:<port>/stream/logs/<id>`) that the
-  iframe connects to directly for true log-follow/stats-tick behavior,
-  bypassing the MCP round trip entirely. Needs a short-lived per-session
-  token embedded in the resource (not a static port+no-auth endpoint) and
-  care with iframe sandbox attributes (see §9) since this is a live
-  same-origin-ish channel. Deferred until the basic technique is proven.
+- **Phase 2: sidecar streaming** — the MCP server also opens a
+  **loopback-only** endpoint (prefer a Unix domain socket; if TCP is the
+  only option the runtime allows, bind strictly to `127.0.0.1`, never
+  `0.0.0.0`) that the iframe connects to directly for true
+  log-follow/stats-tick behavior, bypassing the MCP round trip entirely.
+  Even though nothing leaves the machine, still use a short-lived
+  per-session token embedded in the resource rather than a static
+  no-auth endpoint — other local users/processes on the same box could
+  otherwise reach it — and take care with iframe sandbox attributes (see
+  §9) since this is a live same-origin-ish channel. Deferred until the
+  basic technique is proven.
 
 ## 8. Security and permission model
 
@@ -190,8 +212,17 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
   `allow-same-origin`, which would let a compromised template read/write
   the parent's storage), and the postMessage handler validates
   `event.source`/`event.origin` before trusting a message.
-- **No remote Docker contexts in v1** — local `docker.sock` only. Remote
-  (SSH/TCP) daemons multiply the blast radius and are deferred.
+- **No remote Docker contexts, period** — local `docker.sock` only, per
+  the single-machine deployment model in §1. This isn't a v1
+  simplification to revisit later; remote (SSH/TCP) daemons are out of
+  scope for this design entirely.
+- **No network exposure anywhere in the design** — the MCP transport is
+  stdio, the Docker connection is a local socket, and the optional
+  streaming sidecar (§7) is loopback/Unix-socket only. The threat model
+  is therefore "what can a local process or the rendered iframe do,"
+  not "what can a remote attacker reach" — which is precisely why the
+  iframe sandboxing and tool-tier confirms above matter more here than
+  network-level auth would.
 
 ## 9. Package layout (for the implementation phase — not created yet)
 
@@ -259,19 +290,23 @@ before the next is started:
 ## 12. Recommended first spike (better test use case for Stage 0)
 
 Before wiring anything to a Docker socket, validate the MCP-UI mechanism
-itself against something with **zero blast radius**, so a plumbing bug
-can't be confused with a security decision. A good candidate already
-available in this environment: a **read-only repo/PR status card** built
-on the existing GitHub MCP tools (`list_pull_requests`, `actions_list`) —
-render a small dashboard of open PRs and their CI state, with a "Explain
-this failure" button that sends a `prompt` message asking the agent to
-investigate a specific failing check. This exercises:
+itself against something with **zero blast radius and zero network
+dependency** (per the single-machine constraint in §1 — no GitHub API,
+no remote calls of any kind), so a plumbing bug can't be confused with a
+security decision or a flaky remote call. A good candidate: a **read-only
+local system card** — hostname, uptime, disk usage, and the current
+git branch/status of a couple of local repos, all sourced from local
+syscalls/`fs` reads, no sockets opened at all. Add a "Explain this" button
+on, say, a disk-usage-over-80% row that sends a `prompt` message asking
+the agent to investigate (it can freely use Bash locally — `du`, `df`,
+`git log` — to do so). This exercises:
 
 - resource rendering,
 - the `tool` round trip (refresh),
 - the `prompt` round trip (agent-driven investigation),
 - and a report-style resource on the way back,
 
-without touching anything privileged. Once that's proven, the Docker
-dashboard is a straightforward re-skin with a real permission model
-layered on top per §8.
+without touching anything privileged or leaving the machine. Once that's
+proven, the Docker dashboard is a straightforward re-skin with a real
+permission model layered on top per §8 — still entirely local, per the
+deployment model in §1.
