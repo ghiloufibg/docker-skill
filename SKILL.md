@@ -14,6 +14,14 @@ remediation-action buttons in the investigation report) remain. Read the
 design doc for the full architecture, risk tiers, and staged plan — this
 file only covers how to run and use what's implemented.
 
+Everything this project's build-and-break-it process learned that isn't
+Docker-specific — kit choice, tool/risk design, the `hidden`/theme CSS
+traps, `isError` handling, CSP, payload size, how to actually test
+rendering — is distilled into
+[`docs/guides/building-mcp-ui-servers.md`](docs/guides/building-mcp-ui-servers.md).
+Read that first if the task is "build a different MCP-UI server," not
+"continue this one."
+
 ## What's implemented
 
 `mcp-server/` is a real MCP server built with the official
