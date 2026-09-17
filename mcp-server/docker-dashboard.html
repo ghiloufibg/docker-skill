@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Docker Fleet Dashboard</title>
+</head>
+<body>
+  <main class="main">
+    <header class="header">
+      <h1 class="title">Docker Fleet</h1>
+      <button id="refresh-btn" class="btn">Refresh</button>
+    </header>
+
+    <div id="empty-state" class="empty-state" hidden>No containers found.</div>
+    <div id="card-list" class="card-list"></div>
+
+    <section id="detail-panel" class="detail-panel" hidden>
+      <div class="detail-header">
+        <h2 id="detail-title" class="detail-title">--</h2>
+        <button id="detail-close-btn" class="btn btn-small">Close</button>
+      </div>
+      <dl id="detail-body" class="detail-body"></dl>
+    </section>
+  </main>
+
+  <script type="module" src="./src/docker-dashboard.ts"></script>
+</body>
+</html>

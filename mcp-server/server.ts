@@ -14,6 +14,8 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { listContainers } from "./docker/tools/ps.js";
+import { inspectContainer } from "./docker/tools/inspect.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -121,6 +123,54 @@ async function getPollStats(watchPath: string): Promise<PollStats> {
 // MCP server
 // =============================================================================
 
+// Registers a UI resource that just serves a built HTML file from DIST_DIR —
+// shared by every mcp-app.* entrypoint this server exposes.
+function registerHtmlResource(
+  server: McpServer,
+  uri: string,
+  distFile: string,
+  description: string,
+): void {
+  registerAppResource(
+    server,
+    uri,
+    uri,
+    { mimeType: RESOURCE_MIME_TYPE, description },
+    async (): Promise<ReadResourceResult> => {
+      const html = await fs.readFile(path.join(DIST_DIR, distFile), "utf-8");
+      return { contents: [{ uri, mimeType: RESOURCE_MIME_TYPE, text: html }] };
+    },
+  );
+}
+
+const ContainerSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  image: z.string(),
+  state: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  project: z.string().nullable(),
+  exitCode: z.number().nullable(),
+});
+
+const ContainerDetailSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  image: z.string(),
+  state: z.string(),
+  status: z.string(),
+  restartCount: z.number(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+  exitCode: z.number().nullable(),
+  envKeys: z.array(z.string()),
+  mounts: z.array(z.object({ source: z.string(), destination: z.string(), mode: z.string() })),
+  networks: z.array(z.string()),
+  labels: z.record(z.string(), z.string()),
+  ports: z.array(z.string()),
+});
+
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "docker-skill Stage-0 spike: local system card",
@@ -196,17 +246,64 @@ export function createServer(): McpServer {
     },
   );
 
-  registerAppResource(
+  registerHtmlResource(server, resourceUri, "mcp-app.html", "Local System Card UI");
+
+  // ===========================================================================
+  // Stage 1 (design doc §11 item 1): read-only Docker fleet dashboard.
+  // Tier 0 per §4 — both tools are read-only and pre-approved.
+  // ===========================================================================
+
+  const dashboardUri = "ui://docker-dashboard/docker-dashboard.html";
+
+  registerAppTool(
     server,
-    resourceUri,
-    resourceUri,
-    { mimeType: RESOURCE_MIME_TYPE, description: "Local System Card UI" },
-    async (): Promise<ReadResourceResult> => {
-      const html = await fs.readFile(path.join(DIST_DIR, "mcp-app.html"), "utf-8");
+    "docker-ps",
+    {
+      title: "List Docker Containers",
+      description:
+        "Lists all local Docker containers (running and stopped) with name, " +
+        "image, state, and compose project. Read-only, local socket only.",
+      inputSchema: z.object({}),
+      outputSchema: z.object({ containers: z.array(ContainerSummarySchema) }),
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async (): Promise<CallToolResult> => {
+      const containers = await listContainers();
+      const payload = { containers };
       return {
-        contents: [{ uri: resourceUri, mimeType: RESOURCE_MIME_TYPE, text: html }],
+        content: [{ type: "text", text: JSON.stringify(payload) }],
+        structuredContent: payload,
       };
     },
+  );
+
+  registerAppTool(
+    server,
+    "docker-inspect",
+    {
+      title: "Inspect Docker Container",
+      description:
+        "Detailed read-only inspection of one container: restart count, " +
+        "exit code, mounts, networks, labels, ports, and env var *names* " +
+        "(never values — see design doc §9). Local socket only.",
+      inputSchema: z.object({ id: z.string().describe("Container ID or name") }),
+      outputSchema: ContainerDetailSchema,
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ id }): Promise<CallToolResult> => {
+      const detail = await inspectContainer(id);
+      return {
+        content: [{ type: "text", text: JSON.stringify(detail) }],
+        structuredContent: detail,
+      };
+    },
+  );
+
+  registerHtmlResource(
+    server,
+    dashboardUri,
+    "docker-dashboard.html",
+    "Docker Fleet Dashboard UI",
   );
 
   return server;

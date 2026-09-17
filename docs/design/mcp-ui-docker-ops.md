@@ -341,6 +341,14 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
   freeform text field — freeform exec into a container is effectively
   freeform code execution with container/host escape risk depending on
   privilege mode.
+- **`docker.inspect` returns env var names, never values.** Not anticipated
+  when this table was first written — found during Stage 1 implementation.
+  Any *read-only* tool's output becomes part of the model's context, and
+  container env vars routinely carry secrets (API keys, DB passwords).
+  There's no way to redact selectively without a real secrets-detection
+  pass, so the rule is blunt: names only, always. Applies to every future
+  read-only tool that might surface env/config data (e.g. a Stage 2
+  compose-file viewer), not just this one.
 - **Tier 1/2 actions require both** a UI-side confirm (re-type the
   container name for tier 2) **and** rely on the host's normal MCP tool
   permission prompt — defense in depth, since a compromised or buggy
@@ -365,33 +373,40 @@ MCP tool results are point-in-time snapshots, so "live" views need one of:
 
 ## 10. Package layout
 
-The Stage-0 layout below is what actually exists in this repo today, not
-a projection. Docker-specific pieces (the `docker/` tool handlers,
-`dashboard.html`, `investigation-report.html`, etc.) are still future
-work for Stage 1+ and aren't created yet — everything else here is real:
+The layout below is what actually exists in this repo today (Stage 0 +
+Stage 1), not a projection:
 
 ```
 docker-skill/                (repo root)
-  SKILL.md                   # implemented — Stage-0 usage + "how to continue" notes
+  SKILL.md                   # implemented — Stage-0/1 usage + "how to continue" notes
   mcp-server/
     package.json              # @modelcontextprotocol/ext-apps ^2.0.0,
-                               # @modelcontextprotocol/server 2.0.0, zod ^4
+                               # @modelcontextprotocol/server 2.0.0, dockerode ^5, zod ^4
     tsconfig.json              # client-side (src/), DOM lib, noEmit — type-checked by Vite's build
-    tsconfig.server.json       # server-side (server.ts, index.ts, test/), Node lib, emits dist/
-    vite.config.ts             # vite-plugin-singlefile: bundles src/mcp-app.ts + css into one inlined HTML
-    server.ts                  # tool registration: system-info (model-facing), system-poll (app-only)
+    tsconfig.server.json       # server-side (server.ts, index.ts, docker/, test/), Node lib, emits dist/
+    vite.config.ts             # vite-plugin-singlefile: bundles each entrypoint into one inlined HTML
+    server.ts                  # tool registration: system-info/system-poll (Stage 0),
+                                # docker-ps/docker-inspect (Stage 1)
     index.ts                   # entrypoint — StdioServerTransport only, no HTTP (§1)
-    mcp-app.html                # shell referencing ./src/mcp-app.ts as a module
+    docker/
+      client.ts                 # dockerode wrapper, local socket only (§9)
+      tools/
+        ps.ts                    # listContainers() — backs docker-ps
+        inspect.ts                # inspectContainer(id) — backs docker-inspect; env names only (§9)
+    mcp-app.html                # Stage 0 shell, referencing ./src/mcp-app.ts
+    docker-dashboard.html        # Stage 1 shell, referencing ./src/docker-dashboard.ts
     src/
-      mcp-app.ts                # the App instance: ontoolresult, callServerTool, sendMessage (§6.0/§7)
-      mcp-app.css                # plain CSS, light/dark via prefers-color-scheme (§6.1)
+      mcp-app.ts                # Stage 0 App instance: ontoolresult, callServerTool, sendMessage (§6.0/§7)
+      mcp-app.css
+      docker-dashboard.ts        # Stage 1 App instance: card grid, click-through detail, investigate
+      docker-dashboard.css
     test/
-      smoke.ts                  # headless verification over real stdio MCP protocol (§13 status)
-    dist/                       # build output (gitignored) — index.js, server.js, mcp-app.html
+      smoke.ts                  # headless verification over real stdio MCP protocol (§13/§11 status)
+    dist/                       # build output (gitignored)
 
-    # Stage 1+ (not yet created):
-    #   docker/{client.ts, tools/{ps,logs,inspect,stats,compose,investigate}.ts}
-    #   src/templates or additional mcp-app-*.html for dashboard/detail/investigation-report views
+    # Stage 2+ (not yet created):
+    #   docker/tools/{logs,stats,compose,investigate}.ts
+    #   src/ templates for log viewer, stats charts, investigation-report, compose project view
 
   docs/
     design/
@@ -417,6 +432,22 @@ before the next is started:
    host known to support MCP Apps, per §12.
 1. **Read-only dashboard** — `docker.ps` + `docker.inspect`, manual
    refresh only.
+   **Status: done.** Implemented as `docker-ps` / `docker-inspect` (hyphenated,
+   not dotted — matches the official examples' tool-naming convention, a
+   trivial deviation from this doc's earlier shorthand) in `mcp-server/
+   docker/`. `docker-dashboard.ts` renders the card grid with click-through
+   to a detail panel (`docker-inspect`) and an "Investigate" button on any
+   non-`running` container, same `prompt` pattern as the Stage-0 card.
+   `test/smoke.ts` now also exercises both tools against a **real local
+   Docker daemon** — not mocked. (This sandbox had no daemon or images
+   available and no registry egress, so the test data is two minimal
+   `FROM scratch` images built from small local Go binaries — a
+   long-running one and one that exits with code 137 — rather than pulled
+   images; the tools themselves don't care where the containers came
+   from.) One security-relevant decision made during implementation, not
+   anticipated in §4/§9: `docker-inspect` returns env var **names only**,
+   never values, since container env commonly carries secrets and this
+   tool's output becomes part of the model's context — see §9.
 2. **Logs + stats views**, still read-only, charts per the `dataviz` skill.
 3. **Investigation flow** — `prompt` round trip producing an investigation
    report resource.

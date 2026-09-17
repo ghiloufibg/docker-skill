@@ -17,6 +17,20 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
+async function assertHtmlResource(client: Client, uri: string): Promise<void> {
+  const resource = await client.readResource({ uri });
+  const content = resource.contents[0];
+  assert(content, `resource ${uri} must have at least one content item`);
+  assert(
+    content.mimeType === RESOURCE_MIME_TYPE,
+    `resource ${uri} mimeType must be ${RESOURCE_MIME_TYPE}, got ${content.mimeType}`,
+  );
+  assert("text" in content && typeof content.text === "string", `resource ${uri} must be returned as text, not blob`);
+  const html = content.text;
+  assert(html.includes("<html"), `resource ${uri} text must be an HTML document`);
+  console.log(`resource ${uri}: mimeType ok, ${html.length} bytes`);
+}
+
 async function main() {
   const serverEntry = path.join(import.meta.dirname, "..", "index.js");
   const transport = new StdioClientTransport({
@@ -50,15 +64,45 @@ async function main() {
   assert(!pollResult.isError, "system-poll call must not error");
   console.log("system-poll structuredContent:", JSON.stringify(pollResult.structuredContent, null, 2));
 
-  const resource = await client.readResource({ uri: resourceUri });
-  const content = resource.contents[0];
-  assert(content, "resource must have at least one content item");
-  console.log("resource mimeType:", content.mimeType);
-  assert(content.mimeType === RESOURCE_MIME_TYPE, `resource mimeType must be ${RESOURCE_MIME_TYPE}, got ${content.mimeType}`);
-  assert("text" in content && typeof content.text === "string", "resource must be returned as text, not blob");
-  const html = content.text;
-  assert(html.includes("<html"), "resource text must be an HTML document");
-  console.log(`resource HTML size: ${html.length} bytes`);
+  await assertHtmlResource(client, resourceUri);
+
+  // =============================================================================
+  // Stage 1 (design doc §11 item 1): docker-ps / docker-inspect against the
+  // real local Docker socket — not mocked. Skipped gracefully if no daemon
+  // is reachable, since Stage 0's plumbing check shouldn't hard-fail on a
+  // machine with no Docker running.
+  // =============================================================================
+  assert(toolNames.includes("docker-ps"), "docker-ps tool must be registered");
+  assert(toolNames.includes("docker-inspect"), "docker-inspect tool must be registered");
+
+  const psResult = await client.callTool({ name: "docker-ps", arguments: {} });
+  if (psResult.isError) {
+    console.warn("docker-ps errored (no Docker daemon reachable?) — skipping Stage 1 checks:", psResult.content);
+  } else {
+    const { containers } = psResult.structuredContent as any;
+    console.log(`docker-ps: ${containers.length} container(s) found`);
+    assert(Array.isArray(containers), "containers must be an array");
+
+    if (containers.length > 0) {
+      const first = containers[0];
+      assert(typeof first.id === "string" && first.id.length > 0, "container id must be a non-empty string");
+      assert(typeof first.state === "string", "container state must be a string");
+
+      const inspectResult = await client.callTool({ name: "docker-inspect", arguments: { id: first.id } });
+      assert(!inspectResult.isError, "docker-inspect call must not error");
+      const detail = inspectResult.structuredContent as any;
+      console.log("docker-inspect result for", first.name, ":", JSON.stringify(detail, null, 2));
+      assert(detail.id === first.id, "inspect result id must match the requested container");
+      assert(Array.isArray(detail.envKeys), "envKeys must be an array");
+      for (const key of detail.envKeys) {
+        assert(!key.includes("="), "envKeys must contain names only, never key=value pairs (no leaked values)");
+      }
+
+      const dashboardTool = tools.find((t) => t.name === "docker-ps")!;
+      const dashboardUri = (dashboardTool._meta as any)?.ui?.resourceUri;
+      await assertHtmlResource(client, dashboardUri);
+    }
+  }
 
   await client.close();
   console.log("\nSMOKE TEST PASSED");
