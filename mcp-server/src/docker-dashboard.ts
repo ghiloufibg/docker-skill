@@ -230,6 +230,7 @@ async function loadLogs(): Promise<void> {
       name: "docker-logs",
       arguments: { id: currentContainerId, tail: 100 },
     });
+    if (result.isError) throw new Error("docker-logs returned an error");
     const { lines } = result.structuredContent as unknown as ContainerLogs;
     logsContent.textContent = lines.length > 0 ? lines.join("\n") : "(no log output)";
   } catch (e) {
@@ -420,6 +421,7 @@ async function refreshCardList(): Promise<void> {
   refreshBtn.setAttribute("disabled", "true");
   try {
     const result = await app.callServerTool({ name: "docker-ps", arguments: {} });
+    if (result.isError) throw new Error("docker-ps returned an error");
     const payload = result.structuredContent as unknown as { containers: ContainerSummary[] };
     renderCards(payload.containers);
   } catch (e) {

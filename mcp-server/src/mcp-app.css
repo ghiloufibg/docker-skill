@@ -8,8 +8,10 @@
   --danger: #ef4444;
 }
 
+/* OS-level preference, when the host hasn't set an explicit theme. An
+   explicit light override (rare, but McpUiTheme allows it) still wins. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #111827;
     --fg: #f3f4f6;
     --muted: #9ca3af;
@@ -18,6 +20,23 @@
     --warning: #fbbf24;
     --danger: #f87171;
   }
+}
+
+/* Host-driven theme (applyDocumentTheme sets documentElement[data-theme])
+   — this is what actually fires when the *host's* theme toggle is used,
+   independent of the browser/OS setting. Found missing during a real
+   dark-mode click-through: without this, the widget stayed light while
+   the rest of the host went dark. Must win over the media query above
+   regardless of source order, hence the higher-specificity attribute
+   selector rather than relying on cascade position. */
+:root[data-theme="dark"] {
+  --bg: #111827;
+  --fg: #f3f4f6;
+  --muted: #9ca3af;
+  --border: #374151;
+  --accent: #60a5fa;
+  --warning: #fbbf24;
+  --danger: #f87171;
 }
 
 * {

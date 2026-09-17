@@ -9,8 +9,9 @@
   --success: #22c55e;
 }
 
+/* OS-level preference, when the host hasn't set an explicit theme. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #111827;
     --fg: #f3f4f6;
     --muted: #9ca3af;
@@ -20,6 +21,19 @@
     --danger: #f87171;
     --success: #4ade80;
   }
+}
+
+/* Host-driven theme (applyDocumentTheme) — see mcp-app.css for why this
+   is required, not redundant with the media query above. */
+:root[data-theme="dark"] {
+  --bg: #111827;
+  --fg: #f3f4f6;
+  --muted: #9ca3af;
+  --border: #374151;
+  --accent: #60a5fa;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --success: #4ade80;
 }
 
 * {

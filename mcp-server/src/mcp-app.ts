@@ -156,6 +156,7 @@ refreshBtn.addEventListener("click", async () => {
   refreshBtn.setAttribute("disabled", "true");
   try {
     const result = await app.callServerTool({ name: "system-poll", arguments: {} });
+    if (result.isError) throw new Error("system-poll returned an error");
     const stats = result.structuredContent as unknown as PollStats;
     updateDisk(stats.disk);
     updateMemory(stats.freeMemBytes);

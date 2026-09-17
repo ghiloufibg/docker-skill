@@ -628,6 +628,24 @@ before the next is started:
   does validate and relay — see its `src/sandbox.ts` — but that's this
   one reference implementation's choice, not a spec guarantee every
   host is required to make.
+- **Five further experiments, run specifically to build project-agnostic
+  lessons for future MCP-UI work, not to change docker-skill's own
+  scope.** Full writeup lives in the reusable guide this produced —
+  `docs/guides/building-mcp-ui-servers.md` — rather than duplicated
+  here. Summary: (1) host-driven dark mode was silently broken — fixed,
+  a fourth real bug found by rendering; (2) `_meta.ui.csp.resourceDomains`
+  is genuinely enforced, confirmed both directions with a real external
+  stylesheet; (3) `inputRequired.elicit()` (native host-side confirmation)
+  is refused cleanly by the SDK when the connected client doesn't declare
+  the capability — `basic-host` itself doesn't yet — which turns our own
+  §9 residual gap from a guess into a confirmed, dated fact; (4) the
+  ~240 KB baseline is essentially the SDK's own footprint (a `new
+  App().connect()` widget with zero application code already weighs
+  236 KB), not something our code can trim; (5) found and fixed a fifth
+  bug — two of five `callServerTool` call sites in `docker-dashboard.ts`
+  didn't check `result.isError` and relied on an accidental
+  destructure-of-`undefined` throw instead, which happened to produce
+  the right user-facing behavior but only by luck.
 
 ## 13. Recommended first spike (better test use case for Stage 0)
 
