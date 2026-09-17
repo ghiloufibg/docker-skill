@@ -125,12 +125,26 @@ client's MCP config):
 resources were verified end-to-end against `modelcontextprotocol/ext-apps`'s
 own reference host (`examples/basic-host`), driven headlessly with
 Playwright — tool calls, resource rendering, tab switching, state-aware
-Tier 1/2 buttons, and the type-to-confirm dialog all genuinely work. Two
-real CSS bugs were found and fixed in the process (details in design doc
-§12) — both were elements that stayed visible despite `hidden` being set,
-because their class also set `display` unconditionally, which beats the
-browser's default `[hidden]` rule. If you add a new `hidden`-toggled
-element to any of the three widgets, check its CSS for the same trap.
+Tier 1/2 buttons, and the type-to-confirm dialog all genuinely work. A
+follow-up pass then clicked through *everything* as a real user would —
+Logs/Stats on both running and stopped containers, the full pause →
+unpause → restart → Stop (wrong-name-disabled, then Cancel, then for
+real) → Remove lifecycle on a disposable container, cross-checked
+against actual `docker inspect` output at every step, and the
+Investigate button's `sendMessage` — confirmed delivered, visible in
+`basic-host`'s own Messages panel. Zero JS exceptions across either pass.
+
+Three real bugs were found and fixed in total (details in design doc
+§12): two were the same CSS-specificity trap — `.confirm-overlay` and
+`.investigate-section` stayed visible despite `hidden` being set, because
+their class also set `display` unconditionally, which beats the
+browser's default `[hidden]` rule. The third was different: the Stats
+tab's "unavailable" message for a stopped container rendered next to
+CPU/Memory bars frozen at 0%, reading as real data rather than "we have
+nothing" — fixed by hiding the data block entirely when unavailable.
+If you add a new `hidden`-toggled element to any of the three widgets,
+check its CSS for the first trap; if you add a new empty/error state,
+check you're not showing placeholder-looking data next to it.
 
 **What's still unconfirmed:** whether the **Claude Code CLI** specifically
 renders this — `basic-host` is a reference/test implementation, not

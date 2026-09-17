@@ -589,10 +589,34 @@ before the next is started:
   project:** if its class sets `display` in CSS, it needs this override
   too — grep for `hidden` in the HTML against `display:` in the
   corresponding CSS before assuming a new toggle works.
+- **Follow-up full click-through pass (acting as a real user, not just
+  spot-checking) found one more, different-shaped issue and confirmed
+  everything else genuinely works.** Exercised every path: Logs/Stats
+  tabs on both a running and a stopped container, the complete Tier 1/2
+  action lifecycle through the actual UI (pause → unpause → restart →
+  the wrong-name-stays-disabled case → Cancel (verified via `docker
+  inspect` that nothing happened) → Stop with the correct name → Remove,
+  cross-checked against real Docker state at every step, not just the
+  screen), and the Investigate button's `sendMessage` call — which
+  `basic-host` visibly logged as a delivered message, confirming that
+  round trip actually reaches the host, not just that our code calls the
+  API. Zero JS exceptions across the whole run. The one real finding:
+  the Stats tab's "unavailable" message (for a stopped container) was
+  rendering *next to* CPU/Memory bars frozen at 0% — not wrong data, but
+  something a real user reasonably reads as "0% usage," not "we have
+  nothing." Fixed by hiding the bars/network row entirely (a new
+  `#stats-data` wrapper) whenever the unavailable message shows, so
+  there's only ever one honest answer on screen. This is a UX-clarity
+  class of bug, distinct from the CSS-specificity class above — worth
+  keeping as two separate lessons: *hidden things must actually hide*,
+  and *don't show placeholder-looking data next to a message that
+  contradicts it*.
 - How does the host reconcile a `prompt` message arriving mid-turn (is it
-  queued as the next turn, or does it interrupt)? Affects whether
-  "Investigate" buttons feel responsive. Not answered by the basic-host
-  check above — that reference host has no live agent turn to interrupt.
+  queued as the next turn, or does it interrupt)? Partially narrowed:
+  `basic-host` confirms the message genuinely reaches the host (visible
+  in its Messages panel) — the delivery mechanism works — but it has no
+  live agent turn to interrupt, so the actual mid-turn timing/UX
+  question is still open and needs a real agent host to answer.
 - What's the resource size/latency budget for a re-rendered iframe on
   every tier-0 tool call — is polling actually usable, or does each
   refresh cause a visible flash/reload? The manual-refresh flows above

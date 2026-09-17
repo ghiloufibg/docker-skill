@@ -86,6 +86,7 @@ const statsNetRx = document.getElementById("stats-net-rx")!;
 const statsNetTx = document.getElementById("stats-net-tx")!;
 const statsPids = document.getElementById("stats-pids")!;
 const statsStatus = document.getElementById("stats-status")!;
+const statsData = document.getElementById("stats-data")!;
 
 let currentContainerId: string | null = null;
 let currentDetail: ContainerDetail | null = null;
@@ -246,6 +247,11 @@ function resetStatsDisplay(): void {
   statsNetTx.textContent = "--";
   statsPids.textContent = "--";
   statsStatus.hidden = true;
+  // Hidden until a successful load, not just reset to zeroes — a 0% bar
+  // sitting right under "Stats unavailable" reads as real (if idle) data
+  // to a real user, not as "we have nothing." Found during a full
+  // click-through pass, not the headless smoke test (see design doc §12).
+  statsData.hidden = true;
 }
 
 async function loadStats(): Promise<void> {
@@ -261,6 +267,7 @@ async function loadStats(): Promise<void> {
     statsNetRx.textContent = formatBytes(stats.netRxBytes);
     statsNetTx.textContent = formatBytes(stats.netTxBytes);
     statsPids.textContent = String(stats.pids);
+    statsData.hidden = false;
   } catch (e) {
     // Expected for a stopped container — Docker's stats endpoint only
     // works on running ones. Not a bug, so surface it plainly rather

@@ -41,19 +41,21 @@
       <div id="tab-stats" class="tab-panel" hidden>
         <button id="stats-refresh-btn" class="btn btn-small">Refresh</button>
         <div id="stats-status" class="stats-status" hidden></div>
-        <div class="bar-section">
-          <div class="bar-label"><span>CPU</span><span id="stats-cpu-percent">--%</span></div>
-          <div class="bar"><div id="stats-cpu-bar" class="bar-fill"></div></div>
-        </div>
-        <div class="bar-section">
-          <div class="bar-label"><span>Memory</span><span id="stats-mem-percent">--%</span></div>
-          <div class="bar"><div id="stats-mem-bar" class="bar-fill"></div></div>
-          <div id="stats-mem-detail" class="bar-detail">-- / --</div>
-        </div>
-        <div class="stats-row">
-          <span>Net RX <span id="stats-net-rx">--</span></span>
-          <span>Net TX <span id="stats-net-tx">--</span></span>
-          <span>PIDs <span id="stats-pids">--</span></span>
+        <div id="stats-data">
+          <div class="bar-section">
+            <div class="bar-label"><span>CPU</span><span id="stats-cpu-percent">--%</span></div>
+            <div class="bar"><div id="stats-cpu-bar" class="bar-fill"></div></div>
+          </div>
+          <div class="bar-section">
+            <div class="bar-label"><span>Memory</span><span id="stats-mem-percent">--%</span></div>
+            <div class="bar"><div id="stats-mem-bar" class="bar-fill"></div></div>
+            <div id="stats-mem-detail" class="bar-detail">-- / --</div>
+          </div>
+          <div class="stats-row">
+            <span>Net RX <span id="stats-net-rx">--</span></span>
+            <span>Net TX <span id="stats-net-tx">--</span></span>
+            <span>PIDs <span id="stats-pids">--</span></span>
+          </div>
         </div>
       </div>
 
