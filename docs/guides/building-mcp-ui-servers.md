@@ -7,10 +7,17 @@ This document strips the Docker-specific parts out and keeps only what
 should transfer to *any* MCP-UI server. Where something is a docker-skill
 choice rather than a universal rule, it's marked as such.
 
-Five real bugs got found across this project, and every one of them was
+Eight real bugs got found across this project, across two separate
+rounds of build-and-break-it experimentation, and every one of them was
 found by *actually rendering the page against a real host* — never by
 the headless protocol tests, which were passing the whole time. That's
 the single biggest lesson here, and it shapes most of what follows.
+Round two also turned up a meta-lesson worth stating up front: **a fix
+needs the same rendering-based verification as the bug it fixes** — one
+of the eight (§9a) shipped its first attempt with a wrong CSS/JS
+selector that silently no-op'd the whole fix, and only a second, more
+careful rendering pass caught it. "I fixed it" and "I verified the fix
+by rendering it" are not the same claim.
 
 ## TL;DR checklist
 
@@ -30,8 +37,18 @@ the single biggest lesson here, and it shapes most of what follows.
       never rely on an incidental throw (§10).
 - [ ] Test real failure paths (bad id, race conditions), not just happy
       path (§10).
+- [ ] Guard against a second mutating action firing while the first is
+      still in flight — a confirm dialog blocks a second *click*, not a
+      second *concurrent tool call* (§17).
+- [ ] Give every interactive dialog real keyboard support: initial
+      focus, a Tab/Shift+Tab trap, Escape-to-cancel — and verify the
+      trap by rendering it, not just by reading the code (§16).
+- [ ] Check your layout at a phone-width viewport (~375px), not just
+      whatever width your dev host happens to use (§18).
 - [ ] Actually render the page against a real host before calling
-      anything done (§13-14). This is not optional.
+      anything done (§13-14). This is not optional. Re-verify fixes the
+      same way you found the bug — a fix is a claim, not a fact, until
+      it's been rendered too.
 
 ## 1. What you're actually building
 
@@ -532,6 +549,141 @@ headlessly with Playwright. Concrete recipe and gotchas:
 - [ ] No secrets-shaped data (env values, tokens, credentials) is
       returned by any read-only tool without explicit justification.
 - [ ] Payload size is understood (§12), not guessed at.
+- [ ] Every confirm/modal dialog has real keyboard support, verified by
+      rendering it — not just implemented (§16).
+- [ ] Every mutating action is guarded against firing concurrently with
+      another one on the same target (§17).
+- [ ] The full interaction surface was checked at a phone-width
+      viewport, not just your dev host's default width (§18).
+
+## 16. Keyboard accessibility on dialogs — and verify the fix, not just the bug
+
+A confirm dialog that only works with a mouse is a real accessibility
+gap, and — for a *confirmation* dialog specifically — also a security
+regression: the whole point of a re-type-the-name Tier 2 confirm is to
+slow a destructive action down, and that protection means nothing if a
+keyboard user can Tab past the dialog without ever reaching it. Three
+things a modal needs, none of which a click-only test path will ever
+exercise:
+
+- **Initial focus** moves into the dialog when it opens — and to the
+  *safe* control (Cancel), not the destructive one, so an accidental
+  Enter doesn't fire the action.
+- **A Tab/Shift+Tab trap** keeps focus cycling within the dialog's own
+  focusable elements instead of leaking to the page (or the host)
+  behind it.
+- **Escape** closes the dialog as a cancel.
+
+```ts
+function dialogFocusables(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".confirm-dialog button, .confirm-dialog input"))
+    .filter((el) => !(el as HTMLButtonElement).disabled && el.offsetParent !== null);
+}
+```
+
+**The meta-lesson is more important than the checklist item.** The
+first version of this fix in this project used `#confirm-dialog` in
+that selector — the dialog's actual markup only has
+`class="confirm-dialog"`, no matching id. `querySelectorAll` for a
+nonexistent id silently returns an empty NodeList; `dialogFocusables()`
+always returned `[]`; the trap's own guard clause (`if (focusables.length
+=== 0) return;`) made it a complete no-op. Escape still worked (it
+doesn't depend on that query), so a shallow retest — "does Escape close
+it? yes, ship it" — would have called this fixed. It took a second,
+more careful Playwright pass specifically walking the Tab sequence
+(`document.activeElement` checked *inside the widget's own iframe
+document*, not the ambiguous top-level view a nested sandboxed iframe
+produces) to catch that Tab #2 still escaped the dialog entirely. **A
+fix is a claim, not a fact, until you've rendered it and driven the
+exact interaction it claims to fix** — the same discipline as testing
+the original bug, applied again to your patch for it. Don't let "I
+changed the code that was wrong" substitute for "I watched the new
+behavior happen."
+
+## 17. Guard against concurrent mutating actions
+
+A confirm dialog's full-screen overlay blocks a second *click* while
+it's open — but that only covers the window during which the dialog
+itself is visible. Once a user confirms, there's typically a real gap
+between "the tool call starts" and "the UI re-renders to reflect the
+new state," and during that gap the *previous* set of action buttons is
+often still live. If two different mutating actions are both available
+in that state (e.g. Restart and Pause both showing for a running
+container), a fast user can confirm one, then confirm the other before
+the first's tool call has even returned — firing two mutating calls
+against the same target concurrently, with only whichever one resolves
+last ever reflected in the status message.
+
+This is easy to prove empirically and easy to miss by reasoning about
+the code alone (a code read that only checks "is the overlay open"
+misses the gap entirely, since the overlay *is* closed for that whole
+window). Verified in this project with Playwright by confirming one
+action, then immediately confirming a second, distinct action on the
+same target, and checking real backend state afterward — it landed in
+a valid-but-unintended state (the second action's outcome, with the
+first's result silently dropped).
+
+The fix is a simple in-flight guard, the same shape as disabling a
+"Submit" button during an async request — nothing more elaborate is
+needed:
+
+```ts
+let actionInFlight = false;
+
+async function handleAction(def: ActionDef): Promise<void> {
+  if (actionInFlight || !currentTarget) return; // ignore a click while one's already committing
+  const confirmed = await showConfirm(def);
+  if (!confirmed) return;
+
+  actionInFlight = true;
+  setActionButtonsDisabled(true); // visible feedback — a silently-ignored click reads as "broken"
+  try {
+    await callTheAction(def);
+  } finally {
+    actionInFlight = false;
+    setActionButtonsDisabled(false); // or let the post-action re-render handle it
+  }
+}
+```
+
+Two details worth keeping: guard at the *top* of the handler (a click
+during the in-flight window should be ignored outright, not queued —
+queuing a second confirm dialog for later is more confusing, not less),
+and disable the buttons rather than relying on the guard alone — an
+invisible no-op click looks like a bug to the user even when it's
+correctly protecting them from one.
+
+## 18. Check a phone-width viewport, not just your dev host's width
+
+Not every layout bug is a broken one. A grid that's 2 items per row
+regardless of viewport width can still pass "no horizontal overflow,
+nothing visually cut off" at 375px and still be a real readability
+regression: long values (a full CPU model string, a multi-word platform
+string) get squeezed into a half-width column and wrap across 2-3
+ragged lines, reading as garbled data rather than formatted text. This
+project's reference host happens to render at a comfortable desktop
+width by default, so this was invisible until deliberately resizing the
+viewport — the same blind spot as testing only the happy path, just for
+layout instead of logic.
+
+Check with an explicit narrow viewport (Playwright:
+`newPage({ viewport: { width: 375, height: 667 } })`, roughly
+phone-width) as part of your rendering pass, not just your dev host's
+default window size. Confirm two things, not just one: that nothing
+overflows (`document.documentElement.scrollWidth <=
+document.documentElement.clientWidth`, checked inside the widget's own
+document) *and* that it's still comfortably readable — a screenshot is
+the fastest way to catch the second, since "no overflow" alone doesn't
+catch cramped wrapping. Where it matters, a single `max-width` media
+query switching a multi-column grid to one column is usually enough —
+confirm the wider-viewport layout is unchanged afterward, since this is
+exactly the kind of change that's easy to over-apply.
+
+Whether this matters for a *given* project depends on what hosts you
+expect: not every MCP host renders at phone width today, but the
+MCP-UI ecosystem includes hosts that do (mobile chat apps among them),
+and checking costs one extra Playwright viewport size — cheap enough
+to just always do it.
 
 ## Appendix: where each lesson came from
 
@@ -551,3 +703,11 @@ Every lesson above has a fuller worked example in this repo:
 - The rendering-check recipe — same §12, "Recommended first spike" (§13)
   and the git history's `dev-http-harness.ts`/Playwright-script pattern
   (never committed, by design — see §14 point 2 above).
+- The keyboard-accessibility fix (and its own wrong-selector bug) —
+  `showConfirm`/`dialogFocusables` in `mcp-server/src/docker-dashboard.ts`.
+- The concurrent-action guard — `actionInFlight`/`setActionButtonsDisabled`
+  in the same file, used from `handleAction`.
+- The narrow-viewport fix — the `@media (max-width: 420px)` block in
+  `mcp-server/src/mcp-app.css`.
+- All three round-2 experiments — `docs/design/mcp-ui-docker-ops.md` §12,
+  the bullet after the "Five further experiments" one.

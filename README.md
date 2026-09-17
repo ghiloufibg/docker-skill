@@ -12,8 +12,9 @@ security model, and staged plan.
 **Building your own MCP-UI server?** Skip the Docker-specific parts and
 read [`docs/guides/building-mcp-ui-servers.md`](docs/guides/building-mcp-ui-servers.md)
 instead — a project-agnostic field guide distilled from everything this
-repo's build-and-break-it process turned up, including nine real bugs
-that were only ever found by actually rendering the page.
+repo's build-and-break-it process turned up, including eight real bugs
+across two rounds of experimentation that were only ever found by
+actually rendering the page.
 
 ## Status
 

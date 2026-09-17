@@ -113,6 +113,22 @@ body {
   text-align: right;
 }
 
+/* At phone width, the default 2-per-row grid (Hostname+Platform,
+   CPU+Uptime) squeezes long values like a full CPU model string into a
+   half-width column, wrapping across 3 ragged lines that read as garbled
+   rather than formatted — found by actually rendering at 375px, not
+   visible at any desktop-panel width. One column gives every value the
+   full card width instead. */
+@media (max-width: 420px) {
+  .info-list {
+    grid-template-columns: 1fr;
+  }
+  .info-list dd {
+    text-align: left;
+    margin-bottom: 4px;
+  }
+}
+
 .bar-section {
   margin-bottom: 16px;
 }

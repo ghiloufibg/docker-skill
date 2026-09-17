@@ -1,6 +1,8 @@
 # Design: Docker Ops — an MCP-UI experiment
 
-Status: **design only, nothing implemented**
+Status: **Stages 0-4 implemented and rendering-verified; two rounds of
+build-and-break-it experimentation complete — see `SKILL.md` and
+`docs/guides/building-mcp-ui-servers.md` for the current state**
 Purpose: use a Docker operations/investigation surface as a test vehicle for the
 **MCP-UI technique** (an MCP server returning renderable UI resources, wired
 two ways back into a Claude Code agent) and decide whether it's worth building.
@@ -646,6 +648,47 @@ before the next is started:
   didn't check `result.isError` and relied on an accidental
   destructure-of-`undefined` throw instead, which happened to produce
   the right user-facing behavior but only by luck.
+- **A second round of experiments, same purpose as the first, found
+  three more real bugs — full writeup again in
+  `docs/guides/building-mcp-ui-servers.md`.** Summary: (6) the confirm
+  dialog had no keyboard accessibility at all — Tab escaped it while
+  open, Escape did nothing, focus didn't move to it on open. Fixed with
+  an initial-focus-to-Cancel default, a Tab/Shift+Tab trap, and
+  Escape-to-cancel — but the *first* Playwright pass against the fix
+  gave a confusing partial result, which turned out to be because the
+  trap's own DOM query selected `#confirm-dialog` (an id that doesn't
+  exist in the markup — the element only has `class="confirm-dialog"`),
+  so `dialogFocusables()` silently returned an empty array and the trap
+  never engaged; a second, more precise Playwright pass (checking
+  `document.activeElement` inside the widget's own iframe document
+  rather than the ambiguous top-level view) caught it. The lesson isn't
+  just "add keyboard support" — it's that **a fix needs the same
+  rendering-based verification as the bug it fixes**; the first
+  (wrong-selector) version would have shipped as "fixed" against a
+  looser test. (7) Confirming one mutating action didn't block a second
+  from being confirmed and fired concurrently: the confirm overlay
+  blocks a second click *while a dialog is open*, but nothing guarded
+  the window between a confirmed action's tool call starting and
+  `refreshDetail()` re-rendering the buttons afterward — a real user
+  confirming Restart, then immediately confirming Pause before Restart's
+  tool call returned, fired both against the same container at once,
+  with only the later-resolving one's status ever shown. Fixed with an
+  `actionInFlight` guard plus disabling the action buttons for that
+  window. (8) At a 375px phone-width viewport, the system card's
+  2-items-per-row info grid squeezed long values (a full CPU model
+  string, a multi-word platform string) into a half-width column, where
+  they wrapped across 2-3 ragged lines that read as garbled rather than
+  formatted — not broken (no overflow, nothing cut off, verified via
+  `document.documentElement.scrollWidth`), but a real readability
+  regression only visible at that width. Fixed with a `max-width: 420px`
+  media query switching the grid to one item per row; confirmed the
+  desktop-width layout is unchanged. A fourth area (many containers —
+  29 concurrently, one with 2000+ log lines) was also tested and found
+  no bug: the dashboard's existing 100-line log tail cap and a plain
+  scrolling card grid degraded gracefully, and the `docker-ps` payload
+  scaled to only ~7 KB for 29 containers (~240 bytes/container) — a
+  useful negative result confirming the existing design choices, not
+  every experiment needs to find something broken to be worth running.
 
 ## 13. Recommended first spike (better test use case for Stage 0)
 

@@ -90,6 +90,15 @@ const statsData = document.getElementById("stats-data")!;
 
 let currentContainerId: string | null = null;
 let currentDetail: ContainerDetail | null = null;
+// Guards the window between a confirmed action's tool call and the button
+// re-render that follows it — the confirm overlay blocks a second click
+// while a dialog is open, but nothing stopped a second action from being
+// confirmed and fired *concurrently* with the first once that dialog
+// closed, before refreshDetail() re-rendered the (possibly now-stale)
+// buttons. A real user found this by confirming Restart, then immediately
+// confirming Pause before Restart's tool call returned — see design doc
+// §12 for the full account.
+let actionInFlight = false;
 
 function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -326,6 +335,11 @@ function renderActionButtons(container: HTMLElement, defs: ActionDef[]): void {
   }
 }
 
+function setActionButtonsDisabled(disabled: boolean): void {
+  for (const btn of actionsTier1.querySelectorAll("button")) (btn as HTMLButtonElement).disabled = disabled;
+  for (const btn of actionsTier2.querySelectorAll("button")) (btn as HTMLButtonElement).disabled = disabled;
+}
+
 function renderActionsTab(): void {
   if (!currentDetail) return;
   actionsStatus.hidden = true;
@@ -336,6 +350,23 @@ function renderActionsTab(): void {
 
 // Tier 1: a plain confirm. Tier 2: the Confirm button stays disabled until
 // the typed text exactly matches the container name (design doc §4/§9).
+// Focusable elements inside the dialog, in tab order — used for both the
+// initial focus target and the Tab/Shift+Tab trap below.
+function dialogFocusables(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".confirm-dialog button, .confirm-dialog input")).filter(
+    (el) => !(el as HTMLButtonElement).disabled && el.offsetParent !== null,
+  );
+}
+
+// A real user driving this with a keyboard, not a mouse, found this dialog
+// with zero accessibility support: focus stayed on the button behind the
+// overlay, Tab eventually left the dialog (and the widget's own iframe)
+// while it was still open and unconfirmed, and Escape did nothing. All
+// three fixed here — see design doc §12 for the full account. This
+// matters more than usual for a *confirmation* dialog specifically: the
+// whole point of Tier 2's re-type-the-name step is to slow down a
+// destructive action, and that protection is void if a keyboard user
+// can tab past it without ever reaching the Cancel/Confirm buttons.
 function showConfirm(def: ActionDef, containerName: string): Promise<boolean> {
   return new Promise((resolve) => {
     confirmTitle.textContent = `${def.label} "${containerName}"?`;
@@ -355,13 +386,45 @@ function showConfirm(def: ActionDef, containerName: string): Promise<boolean> {
       confirmOkBtn.disabled = false;
     }
 
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     confirmOverlay.hidden = false;
+    // Default focus to Cancel, not Confirm — a modal shouldn't put the
+    // destructive action one accidental Enter-press away from firing.
+    confirmCancelBtn.focus();
+
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cleanup(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      // Trap focus: wrap Tab/Shift+Tab within the dialog's own focusable set
+      // instead of letting it escape to the page (or the host) behind it.
+      const focusables = dialogFocusables();
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const current = document.activeElement;
+      if (e.shiftKey && current === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && current === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeydown);
 
     const cleanup = (result: boolean) => {
       confirmOverlay.hidden = true;
       confirmCancelBtn.onclick = null;
       confirmOkBtn.onclick = null;
       confirmTypeInput.oninput = null;
+      document.removeEventListener("keydown", onKeydown);
+      // Return focus to whatever triggered the dialog (the action button),
+      // rather than leaving it stranded on a now-hidden element.
+      previouslyFocused?.focus();
       resolve(result);
     };
     confirmCancelBtn.onclick = () => cleanup(false);
@@ -370,13 +433,21 @@ function showConfirm(def: ActionDef, containerName: string): Promise<boolean> {
 }
 
 async function handleAction(def: ActionDef): Promise<void> {
-  if (!currentContainerId || !currentDetail) return;
+  // The confirm overlay blocks a second click while its own dialog is open,
+  // but once confirmed there's a real gap — from here until refreshDetail()
+  // re-renders the buttons — during which the old buttons are still live.
+  // Without this guard a second action can be confirmed and fired while
+  // the first is still in flight, both mutating the same container
+  // concurrently with only the last-resolving one's status ever shown.
+  if (actionInFlight || !currentContainerId || !currentDetail) return;
   const id = currentContainerId;
   const containerName = currentDetail.name;
 
   const confirmed = await showConfirm(def, containerName);
   if (!confirmed) return;
 
+  actionInFlight = true;
+  setActionButtonsDisabled(true);
   actionsStatus.hidden = true;
   try {
     const result = await app.callServerTool({ name: def.tool, arguments: { id } });
@@ -394,13 +465,16 @@ async function handleAction(def: ActionDef): Promise<void> {
       currentContainerId = null;
       currentDetail = null;
     } else {
-      await refreshDetail(id);
+      await refreshDetail(id); // re-renders the Actions tab with fresh state, buttons re-enabled
     }
   } catch (e) {
     console.error(`${def.tool} failed:`, e);
     actionsStatus.className = "actions-status error";
     actionsStatus.textContent = `${def.label} failed — see console.`;
     actionsStatus.hidden = false;
+  } finally {
+    actionInFlight = false;
+    setActionButtonsDisabled(false);
   }
 }
 
