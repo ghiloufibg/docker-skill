@@ -153,8 +153,7 @@ body {
 }
 
 .card-image,
-.card-status,
-.card-project {
+.card-status {
   font-size: 12px;
   color: var(--muted);
   overflow: hidden;
@@ -164,6 +163,34 @@ body {
 
 .card .investigate-btn {
   margin-top: 8px;
+}
+
+.project-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.project-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.project-group-name {
+  font-weight: 600;
+}
+
+.project-group-count {
+  font-size: 12px;
+  color: var(--muted);
+  flex: 1;
+}
+
+.project-group .card-list {
+  margin-bottom: 0;
 }
 
 .detail-panel {
@@ -225,6 +252,89 @@ body {
 
 .tab-btn:hover {
   color: var(--fg);
+}
+
+.tab-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.live-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sparkline {
+  width: 100%;
+  height: 48px;
+  margin-top: 12px;
+}
+
+/* A NEW variant of the §9 [hidden] trap, this time from the browser's own
+   SVG UA stylesheet rather than anything in this file: Chromium's default
+   rule `svg:not(:root) { ... }` has specificity (0,1,1) — higher than a
+   bare `[hidden]` at (0,1,0) — so setting el.hidden = true on an <svg>
+   left it visibly rendering (computed display: inline) even though the
+   `hidden` attribute was genuinely present on the element. `.sparkline`
+   is every root <svg> here matches `:not(:root)` (that pseudo-class means
+   "not the whole document's root", i.e. not <html> — every <svg> matches
+   it), so this needs its own explicit override even though nothing in
+   *this* stylesheet ever sets `display` on it. Caught only by checking
+   computed style after toggling `hidden`, not by reading this file's own
+   rules — the general §9 checklist ("grep the class for `display`") isn't
+   sufficient for SVG elements specifically. */
+.sparkline[hidden] {
+  display: none;
+}
+
+.sparkline-cpu {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.sparkline-mem {
+  fill: none;
+  stroke: var(--success);
+  stroke-width: 1.5;
+}
+
+.sparkline-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* §9 of the guide's own checklist: this class sets `display` unconditionally,
+   which beats the browser's default [hidden] rule at equal specificity —
+   the exact trap that bit .confirm-overlay/.investigate-section in round 1. */
+.sparkline-legend[hidden] {
+  display: none;
+}
+
+.sparkline-legend-cpu::before,
+.sparkline-legend-mem::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+
+.sparkline-legend-cpu::before {
+  background: var(--accent);
+}
+
+.sparkline-legend-mem::before {
+  background: var(--success);
 }
 
 .logs-content {

@@ -53,6 +53,7 @@ const mainEl = document.querySelector(".main") as HTMLElement;
 const refreshBtn = document.getElementById("refresh-btn")!;
 const cardList = document.getElementById("card-list")!;
 const emptyState = document.getElementById("empty-state")!;
+const fleetStatus = document.getElementById("fleet-status")!;
 const detailPanel = document.getElementById("detail-panel")!;
 const detailTitle = document.getElementById("detail-title")!;
 const detailBody = document.getElementById("detail-body")!;
@@ -71,6 +72,7 @@ const confirmOverlay = document.getElementById("confirm-overlay")!;
 const confirmTitle = document.getElementById("confirm-title")!;
 const confirmBody = document.getElementById("confirm-body")!;
 const confirmTypeWrap = document.getElementById("confirm-type-wrap")!;
+const confirmTypeLabel = document.getElementById("confirm-type-label")!;
 const confirmTypeInput = document.getElementById("confirm-type-input") as HTMLInputElement;
 const confirmCancelBtn = document.getElementById("confirm-cancel-btn")!;
 const confirmOkBtn = document.getElementById("confirm-ok-btn") as HTMLButtonElement;
@@ -87,6 +89,13 @@ const statsNetTx = document.getElementById("stats-net-tx")!;
 const statsPids = document.getElementById("stats-pids")!;
 const statsStatus = document.getElementById("stats-status")!;
 const statsData = document.getElementById("stats-data")!;
+const logsLiveToggle = document.getElementById("logs-live-toggle") as HTMLInputElement;
+const logsLiveStatus = document.getElementById("logs-live-status")!;
+const statsLiveToggle = document.getElementById("stats-live-toggle") as HTMLInputElement;
+const sparkline = document.getElementById("stats-sparkline")!;
+const sparklineCpu = document.getElementById("sparkline-cpu")!;
+const sparklineMem = document.getElementById("sparkline-mem")!;
+const sparklineLegend = document.getElementById("sparkline-legend")!;
 
 let currentContainerId: string | null = null;
 let currentDetail: ContainerDetail | null = null;
@@ -111,6 +120,31 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
+// SVGElement.hidden exists but, in this environment at least, setting it
+// false does not reliably remove the `hidden` content attribute the way it
+// does for a plain HTMLElement — the CSS [hidden] override still applies
+// even after `.hidden = false`, leaving the element stuck invisible. Found
+// only by checking getComputedStyle after toggling, not by reading either
+// this file's CSS or the property assignment in isolation — each looked
+// correct on its own. A plain HTMLElement (like sparklineLegend below)
+// doesn't need this — .hidden works normally there.
+//
+// The first fix attempt here (`style.display = hidden ? "none" : ""`) was
+// itself still broken: an *empty* inline style clears any inline override
+// and falls back to the stylesheet cascade — which still matched
+// `.sparkline[hidden]` because the static `hidden` attribute in the HTML
+// markup was never actually removed, only shadowed. Setting a concrete
+// inline value ("block") is what actually wins over the stylesheet
+// regardless of that attribute's state, and toggleAttribute keeps the
+// attribute itself semantically in sync too. Caught the same way as the
+// first bug: checking computed style after toggling, not by reasoning
+// about the code — this exact "the fix's fix also needs verifying"
+// pattern is why §16 of the guide exists for a different element.
+function setSvgHidden(el: Element, hidden: boolean): void {
+  el.toggleAttribute("hidden", hidden);
+  (el as HTMLElement).style.display = hidden ? "none" : "block";
+}
+
 function setBar(fillEl: HTMLElement, percentEl: HTMLElement, percent: number): void {
   fillEl.style.width = `${Math.min(percent, 100)}%`;
   fillEl.classList.remove("warning", "danger");
@@ -125,40 +159,124 @@ function stateClass(state: string): string {
   return "state-other";
 }
 
+function buildCard(c: ContainerSummary): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.dataset.id = c.id;
+
+  const needsInvestigate = c.state !== "running";
+
+  card.innerHTML = `
+    <div class="card-header">
+      <span class="dot ${stateClass(c.state)}"></span>
+      <span class="card-name">${escapeHtml(c.name)}</span>
+    </div>
+    <div class="card-image">${escapeHtml(c.image)}</div>
+    <div class="card-status">${escapeHtml(c.status)}</div>
+    ${needsInvestigate ? `<button class="btn btn-warning btn-small investigate-btn">Investigate</button>` : ""}
+  `;
+
+  card.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).classList.contains("investigate-btn")) return;
+    openDetail(c.id);
+  });
+
+  const investigateBtn = card.querySelector(".investigate-btn");
+  investigateBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    investigate(c);
+  });
+
+  return card;
+}
+
+// Groups cards under their com.docker.compose.project label (design doc §5
+// item 4 / SKILL.md's "compose project view"), each with its own project-
+// level "Down" button. A container with no project label renders as a
+// standalone card, same as before this grouping existed.
 function renderCards(containers: ContainerSummary[]): void {
   cardList.innerHTML = "";
   emptyState.hidden = containers.length > 0;
 
+  const projects = new Map<string, ContainerSummary[]>();
+  const standalone: ContainerSummary[] = [];
   for (const c of containers) {
-    const card = document.createElement("div");
-    card.className = "card";
-    card.dataset.id = c.id;
+    if (c.project) {
+      const members = projects.get(c.project) ?? [];
+      members.push(c);
+      projects.set(c.project, members);
+    } else {
+      standalone.push(c);
+    }
+  }
 
-    const needsInvestigate = c.state !== "running";
+  for (const [project, members] of projects) {
+    const group = document.createElement("div");
+    group.className = "project-group";
 
-    card.innerHTML = `
-      <div class="card-header">
-        <span class="dot ${stateClass(c.state)}"></span>
-        <span class="card-name">${escapeHtml(c.name)}</span>
-      </div>
-      <div class="card-image">${escapeHtml(c.image)}</div>
-      <div class="card-status">${escapeHtml(c.status)}</div>
-      ${c.project ? `<div class="card-project">project: ${escapeHtml(c.project)}</div>` : ""}
-      ${needsInvestigate ? `<button class="btn btn-warning btn-small investigate-btn">Investigate</button>` : ""}
+    const header = document.createElement("div");
+    header.className = "project-group-header";
+    header.innerHTML = `
+      <span class="project-group-name">${escapeHtml(project)}</span>
+      <span class="project-group-count">${members.length} container${members.length === 1 ? "" : "s"}</span>
     `;
+    const downBtn = document.createElement("button");
+    downBtn.className = "btn btn-small btn-danger project-down-btn";
+    downBtn.textContent = "Down";
+    downBtn.addEventListener("click", () => handleProjectDown(project, members));
+    header.appendChild(downBtn);
+    group.appendChild(header);
 
-    card.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).classList.contains("investigate-btn")) return;
-      openDetail(c.id);
-    });
+    const grid = document.createElement("div");
+    grid.className = "card-list";
+    for (const c of members) grid.appendChild(buildCard(c));
+    group.appendChild(grid);
 
-    const investigateBtn = card.querySelector(".investigate-btn");
-    investigateBtn?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      investigate(c);
-    });
+    cardList.appendChild(group);
+  }
 
-    cardList.appendChild(card);
+  for (const c of standalone) cardList.appendChild(buildCard(c));
+}
+
+async function handleProjectDown(project: string, members: ContainerSummary[]): Promise<void> {
+  if (actionInFlight) return;
+  const plural = members.length === 1 ? "" : "s";
+  const confirmed = await showConfirm(
+    { title: `Tear down "${project}"? (${members.length} container${plural})`, tier: 2, typeNoun: "project name" },
+    project,
+  );
+  if (!confirmed) return;
+
+  actionInFlight = true;
+  setActionButtonsDisabled(true);
+  fleetStatus.hidden = true;
+  try {
+    const result = await app.callServerTool({ name: "docker-compose-down", arguments: { project } });
+    if (result.isError) throw new Error("tool returned an error");
+
+    fleetStatus.className = "actions-status ok";
+    fleetStatus.textContent = `"${project}" torn down.`;
+    fleetStatus.hidden = false;
+
+    // The detail panel may be showing a container that was just removed as
+    // part of this project — close it rather than leaving it pointed at a
+    // now-nonexistent container (refreshDetail's docker-inspect would just
+    // fail for it).
+    if (currentContainerId && members.some((m) => m.id === currentContainerId)) {
+      closeLiveStreams();
+      detailPanel.hidden = true;
+      currentContainerId = null;
+      currentDetail = null;
+    }
+    await refreshCardList();
+  } catch (e) {
+    console.error("docker-compose-down failed:", e);
+    fleetStatus.className = "actions-status error";
+    fleetStatus.textContent = `Tearing down "${project}" failed — see console.`;
+    fleetStatus.hidden = false;
+  } finally {
+    actionInFlight = false;
+    setActionButtonsDisabled(false);
   }
 }
 
@@ -196,6 +314,7 @@ async function refreshDetail(id: string): Promise<void> {
 }
 
 async function openDetail(id: string): Promise<void> {
+  closeLiveStreams(); // switching containers — any stream from the previous one is now stale
   currentContainerId = id;
   currentDetail = null;
   logsContent.textContent = "--";
@@ -205,6 +324,7 @@ async function openDetail(id: string): Promise<void> {
 }
 
 detailCloseBtn.addEventListener("click", () => {
+  closeLiveStreams();
   detailPanel.hidden = true;
   currentContainerId = null;
   currentDetail = null;
@@ -291,6 +411,175 @@ async function loadStats(): Promise<void> {
 statsRefreshBtn.addEventListener("click", loadStats);
 
 // =============================================================================
+// Stage 5 (design doc §11 item 5): optional live logs/stats via the
+// loopback streaming sidecar (docker/stream/sidecar.ts). Off by default —
+// manual refresh (above) stays the default per design doc §8's MVP; this
+// is purely opt-in via the "Live" checkboxes. A stream, once opened, keeps
+// running across tab switches (stopping it only on uncheck, on switching
+// to a different container, or on closing the detail panel) — simpler
+// than tying its lifecycle to tab visibility, and updating hidden bars in
+// the background costs nothing a user would notice.
+// =============================================================================
+
+interface StreamInfo {
+  port: number;
+  token: string;
+}
+
+// The sidecar's port+token are constant for this server process (see
+// sidecar.ts's module-level singleton) — fetched once, not on every stream open.
+let streamInfoCache: StreamInfo | null = null;
+
+async function getStreamInfo(): Promise<StreamInfo | null> {
+  if (streamInfoCache) return streamInfoCache;
+  try {
+    const result = await app.callServerTool({ name: "stream-info", arguments: {} });
+    if (result.isError) throw new Error("stream-info returned an error");
+    streamInfoCache = result.structuredContent as unknown as StreamInfo;
+    return streamInfoCache;
+  } catch (e) {
+    console.error("stream-info failed:", e);
+    return null;
+  }
+}
+
+function streamUrl(info: StreamInfo, kind: "logs" | "stats", id: string): string {
+  return `http://127.0.0.1:${info.port}/stream/${kind}/${encodeURIComponent(id)}?token=${encodeURIComponent(info.token)}`;
+}
+
+let activeLogsSource: EventSource | null = null;
+let activeStatsSource: EventSource | null = null;
+const MAX_STATS_HISTORY = 40;
+const statsHistory: { cpu: number; mem: number }[] = [];
+
+function closeLiveStreams(): void {
+  activeLogsSource?.close();
+  activeLogsSource = null;
+  logsLiveToggle.checked = false;
+  logsLiveStatus.hidden = true;
+
+  activeStatsSource?.close();
+  activeStatsSource = null;
+  statsLiveToggle.checked = false;
+  statsHistory.length = 0;
+  setSvgHidden(sparkline, true);
+  sparklineLegend.hidden = true;
+}
+
+async function startLogsLive(): Promise<void> {
+  if (!currentContainerId) return;
+  const info = await getStreamInfo();
+  if (!info) {
+    logsLiveToggle.checked = false;
+    logsLiveStatus.textContent = "Live unavailable — see console.";
+    logsLiveStatus.hidden = false;
+    return;
+  }
+  logsLiveStatus.hidden = true;
+  if (logsContent.textContent === "(no log output)" || logsContent.textContent === "--") {
+    logsContent.textContent = "";
+  }
+  const source = new EventSource(streamUrl(info, "logs", currentContainerId));
+  activeLogsSource = source;
+  source.onmessage = (ev) => {
+    const data = JSON.parse(ev.data) as { line?: string; error?: string };
+    if (data.error) {
+      logsLiveStatus.textContent = data.error;
+      logsLiveStatus.hidden = false;
+      return;
+    }
+    logsContent.textContent += (logsContent.textContent ? "\n" : "") + data.line;
+    logsContent.scrollTop = logsContent.scrollHeight;
+  };
+  source.onerror = () => {
+    logsLiveStatus.textContent = "Live connection lost.";
+    logsLiveStatus.hidden = false;
+    source.close();
+    if (activeLogsSource === source) activeLogsSource = null;
+    logsLiveToggle.checked = false;
+  };
+}
+
+function renderSparkline(): void {
+  if (statsHistory.length < 2) return;
+  setSvgHidden(sparkline, false);
+  sparklineLegend.hidden = false;
+  const toPoints = (key: "cpu" | "mem") =>
+    statsHistory
+      .map((s, i) => {
+        const x = (i / (MAX_STATS_HISTORY - 1)) * 200;
+        const y = 48 - Math.min(s[key], 100) / 100 * 48;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+  sparklineCpu.setAttribute("points", toPoints("cpu"));
+  sparklineMem.setAttribute("points", toPoints("mem"));
+}
+
+async function startStatsLive(): Promise<void> {
+  if (!currentContainerId) return;
+  const info = await getStreamInfo();
+  if (!info) {
+    statsLiveToggle.checked = false;
+    statsStatus.textContent = "Live unavailable — see console.";
+    statsStatus.hidden = false;
+    return;
+  }
+  statsHistory.length = 0;
+  const source = new EventSource(streamUrl(info, "stats", currentContainerId));
+  activeStatsSource = source;
+  source.onmessage = (ev) => {
+    const data = JSON.parse(ev.data) as ContainerStats | { error: string };
+    if ("error" in data) {
+      statsStatus.textContent = data.error;
+      statsStatus.hidden = false;
+      return;
+    }
+    statsStatus.hidden = true;
+    setBar(statsCpuBar, statsCpuPercent, data.cpuPercent);
+    setBar(statsMemBar, statsMemPercent, data.memPercent);
+    statsMemDetail.textContent = `${formatBytes(data.memUsageBytes)} / ${formatBytes(data.memLimitBytes)}`;
+    statsNetRx.textContent = formatBytes(data.netRxBytes);
+    statsNetTx.textContent = formatBytes(data.netTxBytes);
+    statsPids.textContent = String(data.pids);
+    statsData.hidden = false;
+
+    statsHistory.push({ cpu: data.cpuPercent, mem: data.memPercent });
+    if (statsHistory.length > MAX_STATS_HISTORY) statsHistory.shift();
+    renderSparkline();
+  };
+  source.onerror = () => {
+    statsStatus.textContent = "Live connection lost.";
+    statsStatus.hidden = false;
+    source.close();
+    if (activeStatsSource === source) activeStatsSource = null;
+    statsLiveToggle.checked = false;
+  };
+}
+
+logsLiveToggle.addEventListener("change", () => {
+  if (logsLiveToggle.checked) {
+    startLogsLive();
+  } else {
+    activeLogsSource?.close();
+    activeLogsSource = null;
+    logsLiveStatus.hidden = true;
+  }
+});
+
+statsLiveToggle.addEventListener("change", () => {
+  if (statsLiveToggle.checked) {
+    startStatsLive();
+  } else {
+    activeStatsSource?.close();
+    activeStatsSource = null;
+    statsHistory.length = 0;
+    setSvgHidden(sparkline, true);
+    sparklineLegend.hidden = true;
+  }
+});
+
+// =============================================================================
 // Actions tab — Stage 4 (design doc §11 item 4). Tier 1/2 per §4; every
 // action needs a confirm here *and* relies on the host's own MCP
 // permission prompt for the underlying tool call — see §9's
@@ -335,9 +624,15 @@ function renderActionButtons(container: HTMLElement, defs: ActionDef[]): void {
   }
 }
 
+// One dashboard-wide lock, not a per-panel one: a project-down and a
+// per-container action can target overlapping containers, so disabling
+// only one region during the other's in-flight window would reopen the
+// same concurrent-mutation race §12/§17 of the guide already found and
+// fixed for the Actions tab alone.
 function setActionButtonsDisabled(disabled: boolean): void {
   for (const btn of actionsTier1.querySelectorAll("button")) (btn as HTMLButtonElement).disabled = disabled;
   for (const btn of actionsTier2.querySelectorAll("button")) (btn as HTMLButtonElement).disabled = disabled;
+  for (const btn of document.querySelectorAll<HTMLButtonElement>(".project-down-btn")) btn.disabled = disabled;
 }
 
 function renderActionsTab(): void {
@@ -367,18 +662,22 @@ function dialogFocusables(): HTMLElement[] {
 // whole point of Tier 2's re-type-the-name step is to slow down a
 // destructive action, and that protection is void if a keyboard user
 // can tab past it without ever reaching the Cancel/Confirm buttons.
-function showConfirm(def: ActionDef, containerName: string): Promise<boolean> {
+function showConfirm(
+  opts: { title: string; tier: 1 | 2; typeNoun?: string },
+  retypeTarget: string,
+): Promise<boolean> {
   return new Promise((resolve) => {
-    confirmTitle.textContent = `${def.label} "${containerName}"?`;
+    confirmTitle.textContent = opts.title;
     confirmTypeInput.value = "";
+    const noun = opts.typeNoun ?? "container name";
 
-    if (def.tier === 2) {
-      confirmBody.textContent =
-        "Tier 2 action — off by default, per design doc §4. Type the container name to confirm.";
+    if (opts.tier === 2) {
+      confirmBody.textContent = `Tier 2 action — off by default, per design doc §4. Type the ${noun} to confirm.`;
+      confirmTypeLabel.textContent = `Type the ${noun} to confirm:`;
       confirmTypeWrap.hidden = false;
       confirmOkBtn.disabled = true;
       confirmTypeInput.oninput = () => {
-        confirmOkBtn.disabled = confirmTypeInput.value !== containerName;
+        confirmOkBtn.disabled = confirmTypeInput.value !== retypeTarget;
       };
     } else {
       confirmBody.textContent = "Tier 1 action — reversible, per design doc §4.";
@@ -443,7 +742,7 @@ async function handleAction(def: ActionDef): Promise<void> {
   const id = currentContainerId;
   const containerName = currentDetail.name;
 
-  const confirmed = await showConfirm(def, containerName);
+  const confirmed = await showConfirm({ title: `${def.label} "${containerName}"?`, tier: def.tier }, containerName);
   if (!confirmed) return;
 
   actionInFlight = true;
@@ -460,7 +759,9 @@ async function handleAction(def: ActionDef): Promise<void> {
     await refreshCardList(); // state changed — the fleet list is stale either way
 
     if (def.tool === "docker-rm") {
-      // The container no longer exists — nothing left to re-inspect.
+      // The container no longer exists — nothing left to re-inspect, and
+      // any live stream against it is now pointed at nothing.
+      closeLiveStreams();
       detailPanel.hidden = true;
       currentContainerId = null;
       currentDetail = null;
@@ -518,7 +819,12 @@ async function investigate(c: ContainerSummary): Promise<void> {
     `Once you've actually looked, call this server's build-investigation-report ` +
     `tool with your findings (subject "${c.name}") instead of just replying ` +
     `in chat — root cause, the log lines/inspect fields you based it on as ` +
-    `evidence, and remediation as suggestions only (don't take any action).`;
+    `evidence, and remediation as suggestions only (never call a mutating ` +
+    `docker-* tool yourself). If a suggestion maps directly to one of this ` +
+    `server's own container actions (start/restart/pause/unpause/stop/kill/rm ` +
+    `— tool name and this container's id "${c.id}"), include it as a ` +
+    `structured action so the report can offer it as a button; the human ` +
+    `still has to confirm it there before anything runs.`;
   try {
     const { isError } = await app.sendMessage(
       { role: "user", content: [{ type: "text", text: prompt }] },

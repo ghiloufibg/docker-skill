@@ -14,6 +14,7 @@
     </header>
 
     <div id="empty-state" class="empty-state" hidden>No containers found.</div>
+    <div id="fleet-status" class="actions-status" hidden></div>
     <div id="card-list" class="card-list"></div>
 
     <section id="detail-panel" class="detail-panel" hidden>
@@ -34,12 +35,25 @@
       </div>
 
       <div id="tab-logs" class="tab-panel" hidden>
-        <button id="logs-refresh-btn" class="btn btn-small">Refresh</button>
+        <div class="tab-toolbar">
+          <button id="logs-refresh-btn" class="btn btn-small">Refresh</button>
+          <label class="live-toggle">
+            <input type="checkbox" id="logs-live-toggle">
+            Live
+          </label>
+        </div>
+        <div id="logs-live-status" class="stats-status" hidden></div>
         <pre id="logs-content" class="logs-content">--</pre>
       </div>
 
       <div id="tab-stats" class="tab-panel" hidden>
-        <button id="stats-refresh-btn" class="btn btn-small">Refresh</button>
+        <div class="tab-toolbar">
+          <button id="stats-refresh-btn" class="btn btn-small">Refresh</button>
+          <label class="live-toggle">
+            <input type="checkbox" id="stats-live-toggle">
+            Live
+          </label>
+        </div>
         <div id="stats-status" class="stats-status" hidden></div>
         <div id="stats-data">
           <div class="bar-section">
@@ -55,6 +69,14 @@
             <span>Net RX <span id="stats-net-rx">--</span></span>
             <span>Net TX <span id="stats-net-tx">--</span></span>
             <span>PIDs <span id="stats-pids">--</span></span>
+          </div>
+          <svg id="stats-sparkline" class="sparkline" viewBox="0 0 200 48" preserveAspectRatio="none" hidden>
+            <polyline id="sparkline-cpu" class="sparkline-cpu" points=""></polyline>
+            <polyline id="sparkline-mem" class="sparkline-mem" points=""></polyline>
+          </svg>
+          <div id="sparkline-legend" class="sparkline-legend" hidden>
+            <span class="sparkline-legend-cpu">CPU</span>
+            <span class="sparkline-legend-mem">Memory</span>
           </div>
         </div>
       </div>
@@ -82,7 +104,7 @@
         <h3 id="confirm-title" class="confirm-title">--</h3>
         <p id="confirm-body" class="confirm-body">--</p>
         <div id="confirm-type-wrap" class="confirm-type-wrap" hidden>
-          <label for="confirm-type-input" class="confirm-type-label">
+          <label for="confirm-type-input" id="confirm-type-label" class="confirm-type-label">
             Type the container name to confirm:
           </label>
           <input id="confirm-type-input" class="confirm-type-input" type="text" autocomplete="off">

@@ -21,10 +21,10 @@ function computeCpuPercent(stats: any): number {
   return Math.round((cpuDelta / systemDelta) * onlineCpus * 10000) / 100;
 }
 
-export async function getContainerStats(id: string): Promise<ContainerStats> {
-  const container = docker.getContainer(id);
-  const stats = await container.stats({ stream: false });
-
+// Shared between the one-shot tool below and the streaming sidecar
+// (docker/stream/sidecar.ts), which gets the same raw per-tick JSON shape
+// from dockerode's stream:true mode.
+export function computeStatsFromRaw(stats: any): ContainerStats {
   const memUsageBytes = stats.memory_stats.usage ?? 0;
   const memLimitBytes = stats.memory_stats.limit ?? 0;
   const memPercent = memLimitBytes > 0 ? Math.round((memUsageBytes / memLimitBytes) * 10000) / 100 : 0;
@@ -45,4 +45,10 @@ export async function getContainerStats(id: string): Promise<ContainerStats> {
     netTxBytes,
     pids: stats.pids_stats?.current ?? 0,
   };
+}
+
+export async function getContainerStats(id: string): Promise<ContainerStats> {
+  const container = docker.getContainer(id);
+  const stats = await container.stats({ stream: false });
+  return computeStatsFromRaw(stats);
 }

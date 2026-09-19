@@ -5,6 +5,11 @@ export interface ActionResult {
   state: string; // container state after the action, per a fresh inspect
 }
 
+export interface ComposeDownResult {
+  project: string;
+  removed: string[]; // container names, in the order they were torn down
+}
+
 async function currentState(id: string): Promise<string> {
   const info = await docker.getContainer(id).inspect();
   return info.State.Status;
@@ -59,4 +64,35 @@ export async function killContainer(id: string): Promise<ActionResult> {
 export async function removeContainer(id: string): Promise<{ id: string }> {
   await docker.getContainer(id).remove();
   return { id };
+}
+
+// A project-level "down", scoped deliberately narrower than `docker compose
+// down`: it stops+removes every container carrying this
+// com.docker.compose.project label, using the same dockerode calls as the
+// per-container Tier 2 actions above. It does NOT shell out to the compose
+// CLI or touch networks/volumes — the compose file path lives in a label
+// (com.docker.compose.project.config_files) that's attacker-influenced
+// input if it ever came from anything but our own docker-ps listing, and
+// running an arbitrary CLI against an arbitrary path is a materially
+// bigger blast radius than "stop and remove containers this server can
+// already see and already has tools to stop/remove individually." If
+// network/volume cleanup turns out to matter in practice, add it as its
+// own explicit, separately-annotated tool — don't fold it in here.
+export async function stopComposeProject(project: string): Promise<ComposeDownResult> {
+  const containers = await docker.listContainers({
+    all: true,
+    filters: { label: [`com.docker.compose.project=${project}`] },
+  });
+  const removed: string[] = [];
+  for (const c of containers) {
+    const name = c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12);
+    const container = docker.getContainer(c.Id);
+    if (c.State === "running" || c.State === "paused") {
+      if (c.State === "paused") await container.unpause();
+      await container.stop();
+    }
+    await container.remove();
+    removed.push(name);
+  }
+  return { project, removed };
 }

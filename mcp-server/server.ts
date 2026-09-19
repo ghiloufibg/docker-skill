@@ -26,7 +26,9 @@ import {
   stopContainer,
   killContainer,
   removeContainer,
+  stopComposeProject,
 } from "./docker/tools/actions.js";
+import { ensureSidecarStarted, SIDECAR_PORT } from "./docker/stream/sidecar.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -141,6 +143,7 @@ function registerHtmlResource(
   uri: string,
   distFile: string,
   description: string,
+  csp?: { connectDomains?: string[] },
 ): void {
   registerAppResource(
     server,
@@ -149,7 +152,11 @@ function registerHtmlResource(
     { mimeType: RESOURCE_MIME_TYPE, description },
     async (): Promise<ReadResourceResult> => {
       const html = await fs.readFile(path.join(DIST_DIR, distFile), "utf-8");
-      return { contents: [{ uri, mimeType: RESOURCE_MIME_TYPE, text: html }] };
+      return {
+        contents: [
+          { uri, mimeType: RESOURCE_MIME_TYPE, text: html, ...(csp ? { _meta: { ui: { csp } } } : {}) },
+        ],
+      };
     },
   );
 }
@@ -192,6 +199,35 @@ const ContainerStatsSchema = z.object({
   pids: z.number(),
 });
 
+// The allowlist a remediation item's structured action can name — the same
+// Tier 1/2 single-container tools the dashboard's own Actions tab offers,
+// nothing wider. Deliberately excludes docker-compose-down (a different
+// argument shape and blast radius — project-scoped, not container-scoped)
+// and anything outside this server's own gated tool set. See the
+// RemediationActionSchema comment below for why this exists at all.
+const RemediationToolSchema = z.enum([
+  "docker-start",
+  "docker-restart",
+  "docker-pause",
+  "docker-unpause",
+  "docker-stop",
+  "docker-kill",
+  "docker-rm",
+]);
+
+// A structured action lets the investigation-report widget offer a
+// suggestion as a one-click "Run" button instead of plain text — but it
+// goes through the exact same confirm-dialog UI (simple confirm for Tier
+// 1, re-type-the-name for Tier 2) as the dashboard's own action buttons
+// before calling anything, per SKILL.md's "known, deliberate gap" note.
+// This is what makes offering it safe at all: an agent-authored report
+// can *suggest* a tool+id pair from this fixed enum, never invoke it —
+// the human still has to read the dialog and confirm.
+const RemediationActionSchema = z.object({
+  tool: RemediationToolSchema,
+  id: z.string().describe("Container ID or name the action targets"),
+});
+
 const InvestigationReportSchema = z.object({
   subject: z.string().describe("What's being investigated, e.g. a container or host resource name"),
   summary: z.string().describe("One-paragraph summary of the investigation"),
@@ -203,15 +239,34 @@ const InvestigationReportSchema = z.object({
     .array(z.object({ source: z.string(), excerpt: z.string() }))
     .describe("Raw data backing the finding, tagged by where it came from (e.g. 'docker-logs', 'du -sh')"),
   suggestedRemediations: z
-    .array(z.string())
+    .array(
+      z.object({
+        description: z.string().describe("Human-readable remediation suggestion"),
+        action: RemediationActionSchema.optional().describe(
+          "Optional structured action rendered as a gated one-click button. Omit for a plain informational suggestion — most host-level or non-container remediations (e.g. disk cleanup) won't have one.",
+        ),
+      }),
+    )
     .describe(
-      "Plain-text remediation suggestions — informational only, not yet wired to actions (design doc §11 item 4)",
+      "Remediation suggestions. Each can be informational-only, or carry a structured `action` the widget " +
+        "offers as a button gated behind the same confirm dialog as the dashboard's own Tier 1/2 actions " +
+        "(design doc §11 item 4) — never executed without that confirmation.",
     ),
 });
 
 const ActionResultSchema = z.object({
   id: z.string(),
   state: z.string(),
+});
+
+const ComposeDownResultSchema = z.object({
+  project: z.string(),
+  removed: z.array(z.string()),
+});
+
+const StreamInfoSchema = z.object({
+  port: z.number(),
+  token: z.string(),
 });
 
 export function createServer(): McpServer {
@@ -399,11 +454,34 @@ export function createServer(): McpServer {
     },
   );
 
+  // Stage 5 (design doc §11 item 5): app-only, same reasoning as
+  // system-poll above — the widget's own "Live" toggle calls this to get
+  // the sidecar's port + auth token, the model never needs it or should
+  // be able to trigger it. See docker/stream/sidecar.ts for the sidecar
+  // itself and the token/CORS trade-offs.
+  registerAppTool(
+    server,
+    "stream-info",
+    {
+      title: "Get streaming sidecar connection info",
+      description: "Returns the loopback streaming sidecar's port and per-process auth token. App-only.",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      inputSchema: z.object({}),
+      outputSchema: StreamInfoSchema,
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async (): Promise<CallToolResult> => {
+      const info = ensureSidecarStarted();
+      return { content: [{ type: "text", text: JSON.stringify(info) }], structuredContent: info };
+    },
+  );
+
   registerHtmlResource(
     server,
     dashboardUri,
     "docker-dashboard.html",
     "Docker Fleet Dashboard UI",
+    { connectDomains: [`http://127.0.0.1:${SIDECAR_PORT}`] },
   );
 
   // ===========================================================================
@@ -581,6 +659,27 @@ export function createServer(): McpServer {
     },
     async ({ id }): Promise<CallToolResult> => {
       const result = await removeContainer(id);
+      return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+    },
+  );
+
+  registerAppTool(
+    server,
+    "docker-compose-down",
+    {
+      title: "Tear Down Compose Project",
+      description:
+        "Stops and removes every container carrying this docker-compose project label — the same " +
+        "dockerode calls as docker-stop/docker-rm applied to the whole project, not the compose CLI " +
+        "(see docker/tools/actions.ts for why). Permanently removes containers — irreversible. " +
+        "Tier 2 (design doc §4) — off by default, requires confirm.",
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+      inputSchema: z.object({ project: z.string().describe("com.docker.compose.project label value") }),
+      outputSchema: ComposeDownResultSchema,
+      _meta: { ui: { resourceUri: dashboardUri } },
+    },
+    async ({ project }): Promise<CallToolResult> => {
+      const result = await stopComposeProject(project);
       return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
     },
   );

@@ -159,8 +159,11 @@ async function main() {
       { source: "docker-inspect", excerpt: "ExitCode: 137, RestartCount: 0" },
     ],
     suggestedRemediations: [
-      "Check the application's own logs for the actual failure reason.",
-      "If this is unexpected, compare against a known-good image version.",
+      { description: "Check the application's own logs for the actual failure reason." },
+      {
+        description: "Restart it — deliberate exits like this are sometimes transient on this image.",
+        action: { tool: "docker-restart", id: "test-crashed" },
+      },
     ],
   };
 
@@ -169,7 +172,19 @@ async function main() {
   const reportEcho = reportResult.structuredContent as any;
   assert(reportEcho.subject === sampleReport.subject, "report structuredContent must echo the input");
   assert(reportEcho.timeline.length === 2, "report timeline must round-trip intact");
+  assert(
+    reportEcho.suggestedRemediations[1]?.action?.tool === "docker-restart",
+    "a remediation item's structured action must round-trip intact",
+  );
   console.log("build-investigation-report accepted sample report for:", reportEcho.subject);
+
+  // A remediation action naming a tool outside the fixed enum (§ RemediationActionSchema
+  // in server.ts) must be rejected by schema validation, not silently accepted —
+  // this is the actual security boundary for agent-authored remediation suggestions.
+  const badReport = { ...sampleReport, suggestedRemediations: [{ description: "x", action: { tool: "docker-compose-down", id: "y" } }] };
+  const badResult = await client.callTool({ name: "build-investigation-report", arguments: badReport });
+  assert(badResult.isError, "a remediation action tool outside the fixed enum must be rejected");
+  console.log("build-investigation-report OK: out-of-enum remediation action rejected");
 
   await assertHtmlResource(client, reportUri);
 
@@ -237,8 +252,104 @@ async function main() {
     }
   }
 
+  // =============================================================================
+  // Compose project view: docker-compose-down. Two disposable containers
+  // sharing a fake com.docker.compose.project label, torn down via the tool
+  // rather than the compose CLI (see docker/tools/actions.ts for why) —
+  // confirms both actually get stopped+removed, not just the first.
+  // =============================================================================
+  assert(toolNames.includes("docker-compose-down"), "docker-compose-down tool must be registered");
+  if (images.length === 0) {
+    console.warn(`${image} not found — skipping compose-down check`);
+  } else {
+    const project = `smoke-compose-${Date.now()}`;
+    const members = await Promise.all(
+      [0, 1].map(async (i) => {
+        const c = await docker.createContainer({
+          Image: image,
+          name: `docker-skill-smoke-compose-${Date.now()}-${i}`,
+          Labels: { "com.docker.compose.project": project },
+        });
+        await c.start();
+        return c;
+      }),
+    );
+    try {
+      const downResult = await client.callTool({ name: "docker-compose-down", arguments: { project } });
+      assert(!downResult.isError, "docker-compose-down must not error");
+      const removed = (downResult.structuredContent as any).removed as string[];
+      assert(removed.length === 2, `docker-compose-down must report both containers removed, got ${removed.length}`);
+      console.log(`docker-compose-down OK: tore down ${removed.length} containers in project "${project}"`);
+
+      const stillThere = await docker.listContainers({
+        all: true,
+        filters: JSON.stringify({ label: [`com.docker.compose.project=${project}`] }),
+      });
+      assert(stillThere.length === 0, "all project containers must actually be gone after docker-compose-down");
+    } finally {
+      await Promise.all(members.map((c) => c.remove({ force: true }).catch(() => {})));
+    }
+  }
+
+  // =============================================================================
+  // Stage 5: the streaming sidecar. stream-info hands out the port+token;
+  // this confirms the sidecar actually comes up and streams real events
+  // for a running container, and that a wrong token is genuinely rejected
+  // — not just that the tool call succeeds (see docker/stream/sidecar.ts
+  // for the token's role).
+  // =============================================================================
+  assert(toolNames.includes("stream-info"), "stream-info tool must be registered");
+  const running = await docker.listContainers({ filters: JSON.stringify({ status: ["running"] }) });
+  if (running.length === 0) {
+    console.warn("no running container — skipping streaming sidecar check");
+  } else {
+    const streamInfoResult = await client.callTool({ name: "stream-info", arguments: {} });
+    assert(!streamInfoResult.isError, "stream-info must not error");
+    const { port, token } = streamInfoResult.structuredContent as any;
+    assert(typeof port === "number" && typeof token === "string" && token.length > 0, "stream-info must return a port and token");
+
+    const statsUrl = `http://127.0.0.1:${port}/stream/stats/${running[0].Id}?token=${token}`;
+    const firstEvent = await readOneSseEvent(statsUrl, 5000);
+    assert(firstEvent !== null, "stats stream must emit at least one event within 5s");
+    const parsed = JSON.parse(firstEvent!);
+    assert(typeof parsed.cpuPercent === "number", "streamed stats event must look like ContainerStats");
+    console.log(`streaming sidecar OK: live stats event received (cpuPercent=${parsed.cpuPercent})`);
+
+    const wrongTokenRes = await fetch(`http://127.0.0.1:${port}/stream/stats/${running[0].Id}?token=wrong`);
+    assert(wrongTokenRes.status === 403, `wrong token must be rejected with 403, got ${wrongTokenRes.status}`);
+    console.log("streaming sidecar OK: wrong token rejected with 403");
+  }
+
   await client.close();
   console.log("\nSMOKE TEST PASSED");
+}
+
+// Connects to an SSE endpoint, returns the `data:` payload of the first
+// event received, or null if none arrives before `timeoutMs`. Aborts the
+// underlying connection either way — this is a smoke check, not a
+// long-lived subscriber.
+async function readOneSseEvent(url: string, timeoutMs: number): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok || !res.body) return null;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) return null;
+      buffer += decoder.decode(value, { stream: true });
+      const match = buffer.match(/^data: (.+)$/m);
+      if (match) return match[1];
+    }
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
 }
 
 main().catch((e) => {

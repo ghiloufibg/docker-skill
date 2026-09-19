@@ -553,7 +553,50 @@ before the next is started:
    wrong via guesswork seemed worse than being explicit about relying on
    the UI-dialog-plus-host-prompt combination instead. Revisit this if
    the mutating tools ever move beyond an experimental spike.
-5. *(optional)* **Sidecar streaming** for true live logs/stats.
+
+   **Update (round 3):** the mechanism itself is no longer a guess.
+   Tested `inputRequired`/`inputRequired.elicit()` directly against
+   `@modelcontextprotocol/server` + `@modelcontextprotocol/client` 2.0.0
+   (confirmed still the latest published version) with two clients: one
+   that doesn't declare `elicitation` gets a clean `isError: true` with a
+   specific message (unchanged from before); one that declares
+   `elicitation: {}` and registers an `elicitation/create` handler gets
+   the *entire* multi-round-trip flow working end-to-end through
+   `client.callTool()` alone, no manual retry code needed. So the SDK
+   side is confirmed working, not hypothetical — what's still open is a
+   real host implementing the client side; `basic-host`, this project's
+   only available reference host, still doesn't. Full write-up in §12.
+5. **Sidecar streaming** for true live logs/stats.
+   **Status: done.** `docker/stream/sidecar.ts` — a loopback-only
+   (127.0.0.1) SSE server, started lazily on first use (not at process
+   startup), with a random per-process token required on every request
+   (the classic "any local process can reach a localhost port" concern,
+   mitigated rather than eliminated — full reasoning in that file's doc
+   comment). The dashboard's Logs/Stats tabs gained an opt-in "Live"
+   checkbox each; manual refresh stays the default per §8's MVP. Verified
+   surviving a container restart mid-stream, which took two real bugs to
+   get right — see §12.
+6. *(not in the original numbered plan — §5 item 4)* **Compose project
+   view.** **Status: done.** Cards group by `com.docker.compose.project`
+   label with a project-level "Down" button. `docker-compose-down` stops
+   and removes every container carrying that label via the same dockerode
+   calls as the per-container Tier 2 tools — deliberately not the compose
+   CLI (a label-derived file path is attacker-influenced input the moment
+   it comes from anywhere but our own `docker-ps` listing; see
+   `docker/tools/actions.ts`'s `stopComposeProject` comment).
+7. *(not in the original numbered plan — deferred from §11 item 3)*
+   **One-click remediation in the investigation report.** **Status:
+   done, scoped narrower than "real buttons" originally implied.**
+   `suggestedRemediations` items can now carry a structured
+   `action: { tool, id }` drawn from a fixed server-side enum (the same
+   seven Tier 1/2 container tools), rendered as a "Run" button — but
+   every click still goes through the identical UI confirm dialog as the
+   dashboard's own action buttons, never a direct `callServerTool`. An
+   agent-authored report can suggest a tool+id pair; it cannot invoke
+   one. This is deliberately not gated by elicitation even though §11
+   item 4's update above confirms the mechanism works — there's still no
+   real host to route it through, so the UI-dialog-plus-host-prompt
+   layering from item 4 is what actually protects this too.
 
 ## 12. Open questions / risks
 
@@ -689,6 +732,51 @@ before the next is started:
   scaled to only ~7 KB for 29 containers (~240 bytes/container) — a
   useful negative result confirming the existing design choices, not
   every experiment needs to find something broken to be worth running.
+- **A third round — this time building genuinely new features (compose
+  view, live streaming, gated remediation) rather than only probing the
+  existing surface — found three more real bugs, all in the new
+  streaming code, plus confirmed a previously-open question.** Full
+  writeup again in `docs/guides/building-mcp-ui-servers.md`. Summary:
+  (9) a *new* variant of the `[hidden]` CSS trap — this time the
+  overriding rule came from the **browser's own SVG default stylesheet**
+  (`svg:not(:root)`, specificity (0,1,1)), not from anything in this
+  project's CSS, so setting `.hidden = true/false` on the stats
+  sparkline's `<svg>` left it stuck visible regardless of state; fixed
+  with an explicit `.sparkline[hidden]{display:none}` override — except
+  that fix's *own first version* (`style.display = hidden ? "none" :
+  ""`) was still broken, because an empty inline style clears the
+  override and falls back to the stylesheet, which still matched the
+  never-removed static `hidden` attribute; the working fix sets a
+  concrete inline value (`"block"`) and calls `toggleAttribute` to keep
+  the attribute itself in sync too — verified by checking
+  `getComputedStyle` after toggling, not by reading either version of
+  the code. (10) The live-stats/logs streaming sidecar's reconnect logic
+  needed two real fixes, both found only by scripting an actual
+  container restart while "Live" was on, not by reasoning about
+  dockerode: first, `docker logs -f`/`stats({stream:true})` don't emit
+  `'end'` or `'error'` when the container they're following restarts —
+  the connection just goes quiet — so the sidecar now polls
+  `State.StartedAt` and forces a reconnect when it changes, rather than
+  waiting on stream lifecycle events that never fire. Second, the first
+  version of that reconnect's gap-closing `since` parameter only tracked
+  the last *received* line's timestamp, defaulting to "only new lines"
+  until something arrived — which permanently broke reconnects for a
+  container that logs once at startup and goes silent, because `since`
+  never got set on the very case it existed to handle; fixed by tracking
+  "the moment we started watching" instead, independent of whether
+  anything was ever received. Caught only by scripting **two restarts in
+  a row**, not one — the first fix looked completely correct against a
+  single restart. (11) Re-verified the elicitation question from round
+  1/§11 item 4 directly against the SDK (not a host): confirmed the full
+  round trip genuinely works end-to-end when a client declares the
+  capability, resolving what had been a documented guess into a
+  confirmed fact — see item 4's update above. Two more additions (a
+  compose project view, gated one-click remediation in the investigation
+  report) shipped without incident once built on top of the
+  already-hardened confirm-dialog code from round 2 — the accessibility
+  and concurrent-action fixes from that round carried forward correctly
+  into the new remediation-button dialog with no new bugs, which is
+  itself a small data point for reusing hardened code over rewriting it.
 
 ## 13. Recommended first spike (better test use case for Stage 0)
 

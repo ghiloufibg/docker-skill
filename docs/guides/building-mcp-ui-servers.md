@@ -7,17 +7,26 @@ This document strips the Docker-specific parts out and keeps only what
 should transfer to *any* MCP-UI server. Where something is a docker-skill
 choice rather than a universal rule, it's marked as such.
 
-Eight real bugs got found across this project, across two separate
+Eleven real bugs got found across this project, across three separate
 rounds of build-and-break-it experimentation, and every one of them was
-found by *actually rendering the page against a real host* — never by
-the headless protocol tests, which were passing the whole time. That's
-the single biggest lesson here, and it shapes most of what follows.
-Round two also turned up a meta-lesson worth stating up front: **a fix
-needs the same rendering-based verification as the bug it fixes** — one
-of the eight (§9a) shipped its first attempt with a wrong CSS/JS
-selector that silently no-op'd the whole fix, and only a second, more
-careful rendering pass caught it. "I fixed it" and "I verified the fix
-by rendering it" are not the same claim.
+found by *actually rendering the page against a real host* (or, for the
+streaming ones, actually driving a real container restart against a
+real daemon) — never by the headless protocol tests, which were passing
+the whole time. That's the single biggest lesson here, and it shapes
+most of what follows.
+
+A meta-lesson showed up more than once, in more than one shape: **a fix
+needs the same real-conditions verification as the bug it fixes.** In
+round two, a keyboard-trap fix (§16) shipped its first attempt with a
+wrong CSS/JS selector that silently no-op'd the whole fix, caught only
+by a second, more careful rendering pass. In round three, that same
+pattern showed up twice more in a single feature: a `[hidden]`-on-`<svg>`
+fix's first attempt looked right in the diff and was still wrong (§9),
+and a streaming reconnect fix that worked cleanly for one container
+restart quietly failed the same way on the *second* restart in a row
+(§19) — caught only by testing two in sequence, not one. "I changed the
+code that was wrong" and "I watched the new behavior happen, more than
+once if the bug is about a gap between events" are not the same claim.
 
 ## TL;DR checklist
 
@@ -28,9 +37,13 @@ by rendering it" are not the same claim.
 - [ ] Tag every tool with `readOnlyHint`/`destructiveHint`/`idempotentHint` (§5).
 - [ ] Decide `tool` vs `prompt` per action deliberately (§6).
 - [ ] Layer your confirm story: UI dialog + host permission prompt +
-      annotations, and know elicitation may not be supported yet (§7).
+      annotations + elicitation where a host supports it — the mechanism
+      itself is verified working against the SDK directly, so test your
+      server's own behavior even without a host (§7).
 - [ ] Give every `hidden`-toggled element a `[hidden]` CSS override if its
-      class sets its own `display` (§9).
+      class sets its own `display` — and don't assume an `<svg>` with no
+      `display` rule in your own CSS is safe, the browser's own SVG
+      stylesheet can be the thing overriding you (§9).
 - [ ] Give every theme-aware color token both a media-query rule *and* a
       `[data-theme]` rule (§8).
 - [ ] Check `result.isError` explicitly at every `callServerTool` site —
@@ -45,6 +58,11 @@ by rendering it" are not the same claim.
       trap by rendering it, not just by reading the code (§16).
 - [ ] Check your layout at a phone-width viewport (~375px), not just
       whatever width your dev host happens to use (§18).
+- [ ] For any live/streaming connection: don't trust the stream's own
+      'end'/'error' events to notice the thing it's watching changed —
+      poll external state and reconnect on that instead; give a
+      reconnect a real resume point, not just "new data only"; test with
+      two disruptions in a row, not one (§19).
 - [ ] Actually render the page against a real host before calling
       anything done (§13-14). This is not optional. Re-verify fixes the
       same way you found the bug — a fix is a claim, not a fact, until
@@ -240,8 +258,10 @@ separately from the agent's own reasoning quality, and it'll be worse
 at it.
 
 If your report has "suggested next actions," think hard before making
-them one-click buttons that call mutating tools — see §7's note on why
-this project deliberately kept those as plain text.
+them one-click buttons that call mutating tools directly — see §7's note
+on how this project eventually did wire that up safely (a fixed
+server-side enum plus the *same* UI confirm dialog as everything else,
+not a shortcut around it).
 
 ## 7. Security: layer your defenses, know their limits
 
@@ -260,17 +280,32 @@ For any mutating action, stack these — they're not alternatives:
 3. **Tool annotations** (`destructiveHint`, §5) — the spec-level signal
    that lets a compliant host apply its own extra scrutiny, independent
    of whether your resource's UI dialog fires correctly.
-4. **Native host elicitation** (`inputRequired.elicit()` in
-   `@modelcontextprotocol/server`), if the connected host supports it —
-   the strongest option, since it routes confirmation through the
+4. **Native host elicitation** (`inputRequired`/`inputRequired.elicit()`
+   in `@modelcontextprotocol/server`), if the connected host supports it
+   — the strongest option, since it routes confirmation through the
    *host's own UI*, not your iframe, so a compromised resource can't
-   bypass it by construction. **Check before relying on it**: the SDK
-   itself gracefully detects an unsupporting client and returns a clean
-   tool error (`isError: true`, specific message) rather than hanging —
-   but as of this writing, not every host implements the client side of
-   it yet, including reference/test hosts. Feature-detect
-   (`getUiCapability(clientCapabilities)`) and fall back to layers 1-3
-   when it's unavailable, don't assume it.
+   bypass it by construction. **The mechanism is confirmed working, not
+   hypothetical** — tested directly against `@modelcontextprotocol/server`
+   + `@modelcontextprotocol/client` (2.0.0, the latest published version
+   as of this writing): a client with no `elicitation` capability gets a
+   clean `isError: true` with a specific message (safe to rely on, easy
+   to test without any host at all — see below); a client that declares
+   `elicitation: {}` and registers an `elicitation/create` handler gets
+   the entire multi-round-trip retry handled transparently by
+   `client.callTool()`, no extra code needed on either side. What's
+   *still* unconfirmed is any real host implementing the client half —
+   as of this writing, `basic-host` (the official MCP Apps reference
+   host) still doesn't declare the capability, so there's nothing to
+   route through yet in practice. **Test your own server's behavior
+   either way** without needing a host: connect a bare
+   `@modelcontextprotocol/client` `Client` twice, once with no special
+   capabilities (expect the clean refusal) and once with
+   `{ capabilities: { elicitation: {} } }` plus a
+   `setRequestHandler("elicitation/create", ...)` that auto-responds
+   (expect the full round trip to succeed) — an
+   `InMemoryTransport.createLinkedPair()` needs no network, no host, and
+   no subprocess. Fall back to layers 1-3 when the capability isn't
+   there, don't assume it is.
 
 **Don't leak secrets through read-only tools.** Any tool's output
 becomes part of the model's context. If your domain has something like
@@ -278,7 +313,17 @@ becomes part of the model's context. If your domain has something like
 *names*, never values, by default. There's no good way to redact
 selectively without a real secrets-detection pass, so be blunt about it.
 
-**Be conservative with agent-authored resources triggering mutations.**
+**If you do wire up agent-authored one-click remediation, keep the same
+gates a human-clicked button would have — don't let the report be a
+shortcut around them.** Two things made this safe enough to actually
+ship in this project: (1) a fixed, server-side enum of allowed
+tool+target-shape combinations (the agent can *suggest* one of a known
+set, never name an arbitrary tool), and (2) the button still opens the
+exact same UI confirm dialog as a human-triggered action — same
+initial-focus/Tab-trap/Escape handling (§16), same Tier 1/2 distinction,
+same re-type-the-target-name requirement for anything destructive. The
+agent's report picks *which* button appears; it never gets to skip the
+click. Be conservative about going further than that.
 An investigation report the *agent* filled in, if its "remediation"
 items were real one-click buttons, would mean agent-generated content
 triggering Tier 1/2 actions on click — a bigger attack surface than a
@@ -352,6 +397,33 @@ in JS, grep its class in the CSS. If that class sets `display`, add:
 
 Do this preemptively for every hidden-toggled element in a new widget,
 don't wait to find it by clicking around.
+
+**A second, nastier variant: the overriding rule can come from the
+browser itself, not your CSS.** An inline `<svg>` element toggled the
+same way (`el.hidden = true/false`) stayed visibly rendered even with
+*no* `display` rule anywhere in the project's own stylesheet — because
+Chromium's own SVG default stylesheet includes `svg:not(:root) { ... }`
+(every non-document-root `<svg>` matches this, which is all of them),
+at specificity (0,1,1) — higher than a bare `[hidden]` at (0,1,0). Grepping
+your own CSS for `display` on that element's class finds nothing, because
+there's nothing to find; the fix still needs the same override:
+
+```css
+svg.your-class[hidden] { display: none; }
+```
+
+And even that isn't automatically the end of it: the first attempt to
+fix this specific case used `el.style.display = hidden ? "none" : ""`,
+which is still broken — an *empty* inline style clears the inline
+override and falls back to the stylesheet cascade, which still matched
+the `hidden` attribute if nothing ever actually removed it from the
+element. Setting a concrete inline value (`"none"` / `"block"`) plus
+`el.toggleAttribute("hidden", hidden)` to keep the attribute itself
+honest is what actually works — checked by reading `getComputedStyle`
+after toggling, not by re-reading the diff. If an SVG in your widget
+ever needs to be conditionally hidden, verify it the same way you'd
+verify any other `[hidden]` toggle — don't assume "no `display` in my
+CSS" means it's safe.
 
 ## 10. Error handling: check `isError`, always, explicitly
 
@@ -555,6 +627,13 @@ headlessly with Playwright. Concrete recipe and gotchas:
       another one on the same target (§17).
 - [ ] The full interaction surface was checked at a phone-width
       viewport, not just your dev host's default width (§18).
+- [ ] Any streaming/live connection was tested against the thing it
+      watches actually changing state (not just staying steady), twice
+      in a row, and a wrong/missing auth token on it was confirmed
+      rejected (§19).
+- [ ] If elicitation is used anywhere, both the "capability declared"
+      and "capability absent" paths were tested directly against the SDK
+      (no host needed — §7).
 
 ## 16. Keyboard accessibility on dialogs — and verify the fix, not just the bug
 
@@ -685,6 +764,60 @@ MCP-UI ecosystem includes hosts that do (mobile chat apps among them),
 and checking costs one extra Playwright viewport size — cheap enough
 to just always do it.
 
+## 19. Streaming and live connections: plan for reconnect, don't trust the stream's own lifecycle events
+
+If your widget wants live data instead of manual refresh, you're
+probably running some kind of long-lived connection (a loopback SSE
+sidecar the widget's `EventSource` reaches directly, most likely — a
+browser can't open a Unix socket, so the mechanism the SDK/design doc
+might gesture at for "local-only streaming" still ends up being a
+loopback TCP port in practice). Two real bugs here, both found only by
+scripting an actual disruption to the thing being watched — a container
+restart, in this project's case — never by reasoning about the
+streaming library's API.
+
+**Don't assume the underlying stream tells you when the thing it's
+watching goes away.** A `docker logs -f`/`docker stats --stream` style
+connection, attached before the container it's following restarts, just
+went quiet afterward — no `'end'`, no `'error'`, nothing a `stream.on(...)`
+listener would ever see. The fix wasn't a smarter stream handler; it was
+giving up on the stream's own signals for detecting this at all, and
+polling the thing's *external* state instead (a `setInterval` checking
+the container's `StartedAt` timestamp) to force a reconnect when it
+changes. The general version: if what you're streaming has a lifecycle
+independent of the connection (a process that can restart, a resource
+that can be replaced), don't trust the connection's own events to tell
+you that happened — poll the state directly and react to *that*.
+
+**A reconnect's "resume from where we left off" logic needs a real
+starting point, not just "whatever we last received."** The first fix
+tracked a resume timestamp from the last line actually delivered,
+defaulting to "only brand-new data" until something arrived. That
+silently reintroduced the exact gap it was built to close, for the one
+case that matters most: a source that produces output once and then
+goes quiet (a container that logs a single startup line, say). Nothing
+was ever received to set the resume point, so *every* reconnect fell
+back to "only new data from right now" — permanently missing whatever
+the next restart's startup line was, forever, not just once. The fix:
+track "the moment this connection started watching," independent of
+whether anything was ever received, and only move it forward when real
+data actually arrives. Test this specifically by triggering **two
+disruptions in a row** — the first version passed a single-restart test
+completely cleanly, because the gap it left only shows up on the
+*second* one.
+
+**A loopback sidecar needs its own lightweight auth, even on
+127.0.0.1.** Any process on the same machine can reach a loopback port —
+the same "localhost dev server" trust assumption every local tool with a
+UI ships with, and worth naming rather than ignoring. A random
+per-process token, checked with a timing-safe comparison and handed to
+the widget only over the existing MCP tool-call channel (never baked
+into the static, cacheable HTML bundle), is enough for a local,
+single-user tool without adding real auth infrastructure. Verify the
+rejection path works, not just the happy path — a client fetching the
+stream URL with a wrong or missing token should get a clean 403, and
+that's worth a one-line automated check.
+
 ## Appendix: where each lesson came from
 
 Every lesson above has a fuller worked example in this repo:
@@ -711,3 +844,24 @@ Every lesson above has a fuller worked example in this repo:
   `mcp-server/src/mcp-app.css`.
 - All three round-2 experiments — `docs/design/mcp-ui-docker-ops.md` §12,
   the bullet after the "Five further experiments" one.
+- The SVG `[hidden]` trap and its own two-attempt fix —
+  `setSvgHidden` in `mcp-server/src/docker-dashboard.ts`, and the
+  `.sparkline[hidden]` rule in `mcp-server/src/docker-dashboard.css`.
+- The streaming reconnect logic (both bugs) — `waitForStreamEndOrRestart`
+  and the `sinceUnixSeconds` tracking in `mcp-server/docker/stream/sidecar.ts`.
+- The loopback-sidecar token auth — `timingSafeTokenMatch` and the
+  `stream-info` app-only tool, same file and `mcp-server/server.ts`.
+- The elicitation round-trip verification (both paths) — this guide's
+  own §7 point 4 describes the exact test; the script itself was
+  scratch/temporary (an `InMemoryTransport` pair, never committed) —
+  reproduce it from that description if you need to re-check a newer
+  SDK version.
+- The gated remediation-button pattern — `RemediationActionSchema` in
+  `mcp-server/server.ts`, and `runRemediation`/`showConfirm` in
+  `mcp-server/src/investigation-report.ts` (a near-verbatim port of the
+  dashboard's own confirm-dialog code, including its accessibility fix).
+- The compose-project grouping and teardown — `renderCards`'s project
+  grouping and `handleProjectDown` in `mcp-server/src/docker-dashboard.ts`,
+  `stopComposeProject` in `mcp-server/docker/tools/actions.ts`.
+- All of round 3 — `docs/design/mcp-ui-docker-ops.md` §11 items 5-7 and
+  the bullet after the round-2 one in §12.
