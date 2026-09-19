@@ -7,13 +7,16 @@ This document strips the Docker-specific parts out and keeps only what
 should transfer to *any* MCP-UI server. Where something is a docker-skill
 choice rather than a universal rule, it's marked as such.
 
-Eleven real bugs got found across this project, across three separate
+Twelve real bugs got found across this project, across four separate
 rounds of build-and-break-it experimentation, and every one of them was
 found by *actually rendering the page against a real host* (or, for the
 streaming ones, actually driving a real container restart against a
 real daemon) — never by the headless protocol tests, which were passing
 the whole time. That's the single biggest lesson here, and it shapes
-most of what follows.
+most of what follows. (A couple more, in round four, were caught by
+self-review before a render was ever needed — still worth naming, but
+not part of that twelve; see §20 and the design doc's round-4 write-up
+for the full count.)
 
 A meta-lesson showed up more than once, in more than one shape: **a fix
 needs the same real-conditions verification as the bug it fixes.** In
@@ -818,6 +821,48 @@ rejection path works, not just the happy path — a client fetching the
 stream URL with a wrong or missing token should get a clean 403, and
 that's worth a one-line automated check.
 
+## 20. Optimistic UI and shared refresh paths: two more failure shapes
+
+Two lessons from a round of purely additive, lower-risk-looking work
+(search/filter/sort, bulk actions, loading-state polish) — a reminder
+that "not a new architectural surface" doesn't mean "can't ship a bug."
+
+**A bug of omission hides in whichever function becomes the new central
+point something used to reset ad hoc.** Adding client-side search/filter/
+sort meant every `docker-ps` refresh now had to flow through one
+`setContainers()` function instead of calling the renderer directly, so
+that filtering could be reapplied consistently. That function correctly
+cleared the (also new) bulk-selection state on every refresh — but
+nothing told the bulk toolbar to re-render, so it kept showing a stale
+"N selected" after an action completed and the selection had, in fact,
+already been cleared. Nothing about the code *looked* wrong; a smaller
+diff (calling the renderer inline, as before) would never have had this
+seam at all. When you introduce a new shared choke point that several
+call sites used to reach independently, explicitly re-check that every
+side effect those call sites used to trigger separately still happens —
+"I cleared the state" and "I told the UI the state changed" are two
+different lines, and it's easy to write only the first.
+
+**A fast local round trip can make "does the loading state actually
+show" impossible to confirm by looking.** An optimistic-loading fix
+(show the clicked item's already-known data immediately, plus a
+skeleton, instead of stale previous-item data until the real response
+arrives) is impossible to *dis*confirm by watching a real host over a
+real network — a slow response is exactly the case it's for. But
+confirming it worked, in a local dev loop where the full round trip can
+resolve in under 20ms, hits the opposite problem: a screenshot or a
+`waitForTimeout`-then-check taken any real amount of time after the
+triggering click will simply never catch the skeleton, because it's
+already gone — and that absence looks identical to "the skeleton never
+rendered at all," which is the actual bug this fix exists to prevent.
+Resolve the ambiguity by instrumenting, not by looking harder: a
+`MutationObserver` on the container being updated, logging each mutation
+with a timestamp, shows definitively whether the intermediate state
+existed and for how long, independent of how fast it disappeared. If a
+piece of UI is designed to be transient, "I saw it" and "I have evidence
+it rendered" are not the same claim, and only the second one survives
+someone asking "are you sure?"
+
 ## Appendix: where each lesson came from
 
 Every lesson above has a fuller worked example in this repo:
@@ -865,3 +910,8 @@ Every lesson above has a fuller worked example in this repo:
   `stopComposeProject` in `mcp-server/docker/tools/actions.ts`.
 - All of round 3 — `docs/design/mcp-ui-docker-ops.md` §11 items 5-7 and
   the bullet after the round-2 one in §12.
+- All of round 4 (search/filter/sort, richer detail, bulk actions,
+  UI/UX polish) — `docs/design/mcp-ui-docker-ops.md` §11 item 8 and the
+  round-4 bullet at the end of §12, including the stale-bulk-toolbar bug
+  a Playwright assertion caught and the `prefers-reduced-motion` toast
+  fix a self-review caught first.

@@ -33,6 +33,9 @@ interface ContainerDetail {
   networks: string[];
   labels: Record<string, string>;
   ports: string[];
+  healthStatus: string | null;
+  cpuLimitCores: number | null;
+  memLimitBytes: number | null;
 }
 
 interface ContainerLogs {
@@ -51,9 +54,49 @@ interface ContainerStats {
 
 const mainEl = document.querySelector(".main") as HTMLElement;
 const refreshBtn = document.getElementById("refresh-btn")!;
+const refreshIcon = document.getElementById("refresh-icon")!;
 const cardList = document.getElementById("card-list")!;
 const emptyState = document.getElementById("empty-state")!;
+const fleetNoMatches = document.getElementById("fleet-no-matches")!;
+const fleetSearch = document.getElementById("fleet-search") as HTMLInputElement;
+const fleetStateFilter = document.getElementById("fleet-state-filter") as HTMLSelectElement;
+const fleetSort = document.getElementById("fleet-sort") as HTMLSelectElement;
 const fleetStatus = document.getElementById("fleet-status")!;
+const bulkToolbar = document.getElementById("bulk-toolbar")!;
+const bulkCount = document.getElementById("bulk-count")!;
+const bulkActionsEl = document.getElementById("bulk-actions")!;
+const bulkClearBtn = document.getElementById("bulk-clear-btn")!;
+const toastContainer = document.getElementById("toast-container")!;
+
+// A lightweight, additive notification layer for one-off action results
+// (succeeded/failed) — the existing inline status banners (fleetStatus,
+// actionsStatus) stay as-is for their own persistent, panel-local context
+// (a message that makes sense right where it's read, e.g. next to the
+// Actions tab it came from); a toast is for the "yes, that worked" glance
+// that doesn't need to stick around once read. Auto-dismisses; errors get
+// longer to read before they do.
+function showToast(kind: "ok" | "error", message: string): void {
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${kind}`;
+  toast.textContent = message;
+  toastContainer.appendChild(toast);
+  const timeoutMs = kind === "error" ? 6000 : 3500;
+  const remove = () => {
+    toast.classList.add("toast-leaving");
+    // Not just animationend: prefers-reduced-motion disables the CSS
+    // animation entirely (see the media query below), and an animation
+    // that never runs never fires animationend — this fallback timer is
+    // what actually removes the element in that case, not a backup for
+    // an edge case that "shouldn't happen."
+    toast.addEventListener("animationend", () => toast.remove(), { once: true });
+    setTimeout(() => toast.remove(), 250);
+  };
+  const timer = setTimeout(remove, timeoutMs);
+  toast.addEventListener("click", () => {
+    clearTimeout(timer);
+    remove();
+  });
+}
 const detailPanel = document.getElementById("detail-panel")!;
 const detailTitle = document.getElementById("detail-title")!;
 const detailBody = document.getElementById("detail-body")!;
@@ -159,6 +202,13 @@ function stateClass(state: string): string {
   return "state-other";
 }
 
+// Bulk selection (design doc §5 item 1 extension) — a plain Set of
+// container ids, deliberately reset on every fresh docker-ps fetch
+// (setContainers) rather than reconciled against the new list: a
+// selection surviving a refresh across containers that may have been
+// removed/replaced is more surprising than just starting clean.
+const selectedIds = new Set<string>();
+
 function buildCard(c: ContainerSummary): HTMLElement {
   const card = document.createElement("div");
   card.className = "card";
@@ -167,6 +217,9 @@ function buildCard(c: ContainerSummary): HTMLElement {
   const needsInvestigate = c.state !== "running";
 
   card.innerHTML = `
+    <label class="card-select" title="Select for bulk action">
+      <input type="checkbox" class="card-checkbox" ${selectedIds.has(c.id) ? "checked" : ""}>
+    </label>
     <div class="card-header">
       <span class="dot ${stateClass(c.state)}"></span>
       <span class="card-name">${escapeHtml(c.name)}</span>
@@ -176,9 +229,20 @@ function buildCard(c: ContainerSummary): HTMLElement {
     ${needsInvestigate ? `<button class="btn btn-warning btn-small investigate-btn">Investigate</button>` : ""}
   `;
 
+  const checkbox = card.querySelector(".card-checkbox") as HTMLInputElement;
+  checkbox.addEventListener("click", (e) => e.stopPropagation());
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) selectedIds.add(c.id);
+    else selectedIds.delete(c.id);
+    card.classList.toggle("card-selected", checkbox.checked);
+    updateBulkToolbar();
+  });
+  if (selectedIds.has(c.id)) card.classList.add("card-selected");
+
   card.addEventListener("click", (e) => {
     if ((e.target as HTMLElement).classList.contains("investigate-btn")) return;
-    openDetail(c.id);
+    if ((e.target as HTMLElement).closest(".card-select")) return;
+    openDetail(c);
   });
 
   const investigateBtn = card.querySelector(".investigate-btn");
@@ -190,13 +254,189 @@ function buildCard(c: ContainerSummary): HTMLElement {
   return card;
 }
 
+// The full, unfiltered list from the last docker-ps refresh — search/
+// filter/sort (below) always recompute from this rather than re-fetching,
+// since the data's already in hand and there's no reason to round-trip
+// the tool call just to change what's displayed.
+let allContainers: ContainerSummary[] = [];
+
+function stateBucket(state: string): "running" | "paused" | "exited" | "other" {
+  if (state === "running") return "running";
+  if (state === "paused") return "paused";
+  if (state === "exited" || state === "dead") return "exited";
+  return "other";
+}
+
+// running < paused < other < exited feels like the useful triage order —
+// what's live, then what's frozen, then everything else, stopped last.
+const STATE_SORT_RANK: Record<string, number> = { running: 0, paused: 1, other: 2, exited: 3 };
+
+function setContainers(containers: ContainerSummary[]): void {
+  allContainers = containers;
+  selectedIds.clear();
+  applyFiltersAndRender();
+  updateBulkToolbar(); // reflects the clear above — a stale-but-still-visible toolbar after a fresh fetch reads as broken
+}
+
+function applyFiltersAndRender(): void {
+  const query = fleetSearch.value.trim().toLowerCase();
+  const stateWanted = fleetStateFilter.value;
+  const sortBy = fleetSort.value;
+
+  let filtered = allContainers.filter((c) => {
+    if (query && !c.name.toLowerCase().includes(query) && !c.image.toLowerCase().includes(query)) return false;
+    if (stateWanted !== "all" && stateBucket(c.state) !== stateWanted) return false;
+    return true;
+  });
+
+  filtered = filtered.slice().sort((a, b) => {
+    if (sortBy === "state") {
+      const rankDiff = STATE_SORT_RANK[stateBucket(a.state)] - STATE_SORT_RANK[stateBucket(b.state)];
+      if (rankDiff !== 0) return rankDiff;
+      return a.name.localeCompare(b.name);
+    }
+    if (sortBy === "created") return b.createdAt.localeCompare(a.createdAt);
+    return a.name.localeCompare(b.name);
+  });
+
+  renderCards(filtered);
+
+  // Distinguish "no containers at all" from "some exist, none match" —
+  // showing the same empty message for both reads as a bug ("did my
+  // search break the dashboard?") when it's really just zero results.
+  const hasAnyContainers = allContainers.length > 0;
+  fleetNoMatches.hidden = !(hasAnyContainers && filtered.length === 0);
+}
+
+for (const el of [fleetSearch, fleetStateFilter, fleetSort]) {
+  el.addEventListener("input", applyFiltersAndRender);
+  el.addEventListener("change", applyFiltersAndRender);
+}
+
+// "/" focuses search (a la GitHub/Slack/Linear) — the common power-user
+// convention, so it's the one most likely to be already-known rather than
+// something new to learn. Skipped while any text input/textarea/select
+// already has focus, so it doesn't hijack a "/" a user is actually typing
+// (e.g. into a label or a future free-text field) or double-fire while
+// already in the search box itself.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/") return;
+  const active = document.activeElement;
+  const isTyping = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement;
+  if (isTyping) return;
+  e.preventDefault();
+  fleetSearch.focus();
+});
+
+fleetSearch.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && fleetSearch.value) {
+    e.stopPropagation(); // don't let this Escape also bubble to something else listening for it
+    fleetSearch.value = "";
+    applyFiltersAndRender();
+  }
+});
+
+// Bulk actions: the toolbar only ever offers an action valid for EVERY
+// selected container's current state (ACTION_DEFS.showIf, same rule the
+// per-container Actions tab uses) — no button that would fail for part
+// of the selection ever appears, rather than appearing and silently
+// skipping members it can't apply to.
+function updateBulkToolbar(): void {
+  if (selectedIds.size === 0) {
+    bulkToolbar.hidden = true;
+    return;
+  }
+  bulkToolbar.hidden = false;
+  bulkCount.textContent = `${selectedIds.size} selected`;
+
+  const selected = allContainers.filter((c) => selectedIds.has(c.id));
+  const applicable = ACTION_DEFS.filter((def) => selected.every((c) => def.showIf(c.state)));
+
+  bulkActionsEl.innerHTML = "";
+  if (applicable.length === 0) {
+    bulkActionsEl.innerHTML = `<span class="empty">No action applies to every selected container.</span>`;
+    return;
+  }
+  for (const def of applicable) {
+    const btn = document.createElement("button");
+    btn.className = def.tier === 2 ? "btn btn-small btn-danger" : "btn btn-small";
+    btn.textContent = def.label;
+    btn.addEventListener("click", () => handleBulkAction(def, selected));
+    bulkActionsEl.appendChild(btn);
+  }
+}
+
+bulkClearBtn.addEventListener("click", () => {
+  selectedIds.clear();
+  applyFiltersAndRender(); // re-render to uncheck/unhighlight every card
+  updateBulkToolbar();
+});
+
+async function handleBulkAction(def: ActionDef, targets: ContainerSummary[]): Promise<void> {
+  if (actionInFlight) return;
+  const plural = targets.length === 1 ? "" : "s";
+  // Retyping N container names for a bulk Tier 2 confirm would be
+  // unreasonable UX — typing the count is the bulk-scale equivalent of
+  // "type the container name": still a deliberate, error-prone-to-fake
+  // action, not just a click.
+  const confirmed = await showConfirm(
+    {
+      title: `${def.label} ${targets.length} container${plural}?`,
+      tier: def.tier,
+      typeNoun: `number of containers (${targets.length})`,
+    },
+    String(targets.length),
+  );
+  if (!confirmed) return;
+
+  actionInFlight = true;
+  setActionButtonsDisabled(true);
+  fleetStatus.hidden = true;
+  try {
+    let succeeded = 0;
+    const failed: string[] = [];
+    // Sequential, not Promise.all: each call already goes through the same
+    // tool this dashboard's single-container actions use, and running them
+    // one at a time keeps this from becoming its own miniature version of
+    // the concurrent-mutation race §12/§17 already found and fixed for a
+    // single container — here that would mean several bulk calls' own
+    // refreshes racing each other instead.
+    for (const c of targets) {
+      try {
+        const result = await app.callServerTool({ name: def.tool, arguments: { id: c.id } });
+        if (result.isError) throw new Error("tool returned an error");
+        succeeded++;
+      } catch (e) {
+        console.error(`${def.tool} failed for ${c.name}:`, e);
+        failed.push(c.name);
+      }
+    }
+
+    if (failed.length === 0) {
+      fleetStatus.className = "actions-status ok";
+      fleetStatus.textContent = `${def.label} succeeded on all ${succeeded} container${plural}.`;
+      showToast("ok", fleetStatus.textContent);
+    } else {
+      fleetStatus.className = "actions-status error";
+      fleetStatus.textContent =
+        `${def.label} succeeded on ${succeeded}/${targets.length}; failed: ${failed.join(", ")} — see console.`;
+      showToast("error", `${def.label}: ${succeeded}/${targets.length} succeeded, ${failed.length} failed.`);
+    }
+    fleetStatus.hidden = false;
+    await refreshCardList(); // setContainers clears selectedIds as part of this
+  } finally {
+    actionInFlight = false;
+    setActionButtonsDisabled(false);
+  }
+}
+
 // Groups cards under their com.docker.compose.project label (design doc §5
 // item 4 / SKILL.md's "compose project view"), each with its own project-
 // level "Down" button. A container with no project label renders as a
 // standalone card, same as before this grouping existed.
 function renderCards(containers: ContainerSummary[]): void {
   cardList.innerHTML = "";
-  emptyState.hidden = containers.length > 0;
+  emptyState.hidden = allContainers.length > 0;
 
   const projects = new Map<string, ContainerSummary[]>();
   const standalone: ContainerSummary[] = [];
@@ -257,6 +497,7 @@ async function handleProjectDown(project: string, members: ContainerSummary[]): 
     fleetStatus.className = "actions-status ok";
     fleetStatus.textContent = `"${project}" torn down.`;
     fleetStatus.hidden = false;
+    showToast("ok", fleetStatus.textContent);
 
     // The detail panel may be showing a container that was just removed as
     // part of this project — close it rather than leaving it pointed at a
@@ -274,6 +515,7 @@ async function handleProjectDown(project: string, members: ContainerSummary[]): 
     fleetStatus.className = "actions-status error";
     fleetStatus.textContent = `Tearing down "${project}" failed — see console.`;
     fleetStatus.hidden = false;
+    showToast("error", fleetStatus.textContent);
   } finally {
     actionInFlight = false;
     setActionButtonsDisabled(false);
@@ -286,16 +528,45 @@ function escapeHtml(s: string): string {
   return div.innerHTML;
 }
 
+function healthBadge(health: string | null): string {
+  if (!health) return "";
+  const cls = health === "healthy" ? "health-ok" : health === "unhealthy" ? "health-bad" : "health-pending";
+  return ` <span class="health-badge ${cls}">${escapeHtml(health)}</span>`;
+}
+
+function formatCpuLimit(cores: number | null): string {
+  if (cores === null) return "Unlimited";
+  return `${cores % 1 === 0 ? cores : cores.toFixed(2)} core${cores === 1 ? "" : "s"}`;
+}
+
+// Spans both grid columns of the .detail-body dl (see the CSS) so it reads
+// as a section divider instead of a mislabeled field — no matching <dd>,
+// since grid-column: span 2 consumes the row on its own.
+function sectionHeader(label: string): string {
+  return `<dt class="detail-section-header">${escapeHtml(label)}</dt>`;
+}
+
 function renderDetail(d: ContainerDetail): void {
   currentDetail = d;
-  detailTitle.textContent = d.name;
+  detailTitle.innerHTML = `${escapeHtml(d.name)}${healthBadge(d.healthStatus)}`;
   detailBody.innerHTML = `
+    ${sectionHeader("Status")}
     <dt>State</dt><dd>${escapeHtml(d.status)}</dd>
     <dt>Image</dt><dd>${escapeHtml(d.image)}</dd>
     <dt>Restarts</dt><dd>${d.restartCount}</dd>
+
+    ${sectionHeader("Resource limits")}
+    <dt>CPU</dt><dd>${formatCpuLimit(d.cpuLimitCores)}</dd>
+    <dt>Memory</dt><dd>${d.memLimitBytes === null ? "Unlimited" : formatBytes(d.memLimitBytes)}</dd>
+
+    ${sectionHeader("Network")}
     <dt>Networks</dt><dd>${d.networks.map(escapeHtml).join(", ") || "--"}</dd>
     <dt>Ports</dt><dd>${d.ports.map(escapeHtml).join(", ") || "--"}</dd>
+
+    ${sectionHeader("Storage")}
     <dt>Mounts</dt><dd>${d.mounts.map((m) => escapeHtml(`${m.source} -> ${m.destination} (${m.mode})`)).join("<br>") || "--"}</dd>
+
+    ${sectionHeader("Metadata")}
     <dt>Env vars (names only)</dt><dd>${d.envKeys.map(escapeHtml).join(", ") || "--"}</dd>
     <dt>Labels</dt><dd>${Object.entries(d.labels).map(([k, v]) => escapeHtml(`${k}=${v}`)).join("<br>") || "--"}</dd>
   `;
@@ -313,14 +584,29 @@ async function refreshDetail(id: string): Promise<void> {
   }
 }
 
-async function openDetail(id: string): Promise<void> {
+const DETAIL_SKELETON_HTML = Array.from(
+  { length: 4 },
+  () => `<div class="skeleton-row"></div>`,
+).join("");
+
+// The detail panel used to keep the *previous* container's Inspect data on
+// screen until docker-inspect for the new one resolved — clicking through
+// several containers on a slow connection would show container A's fields
+// under container B's name for a moment. Showing the clicked card's own
+// name immediately (already known, no round trip needed) plus a loading
+// skeleton for the fields still in flight fixes both the stale data and
+// the "did my click register?" dead air.
+async function openDetail(c: ContainerSummary): Promise<void> {
   closeLiveStreams(); // switching containers — any stream from the previous one is now stale
-  currentContainerId = id;
+  currentContainerId = c.id;
   currentDetail = null;
   logsContent.textContent = "--";
   resetStatsDisplay();
+  detailTitle.textContent = c.name;
+  detailBody.innerHTML = DETAIL_SKELETON_HTML;
+  detailPanel.hidden = false;
   switchTab("inspect");
-  await refreshDetail(id);
+  await refreshDetail(c.id);
 }
 
 detailCloseBtn.addEventListener("click", () => {
@@ -633,6 +919,7 @@ function setActionButtonsDisabled(disabled: boolean): void {
   for (const btn of actionsTier1.querySelectorAll("button")) (btn as HTMLButtonElement).disabled = disabled;
   for (const btn of actionsTier2.querySelectorAll("button")) (btn as HTMLButtonElement).disabled = disabled;
   for (const btn of document.querySelectorAll<HTMLButtonElement>(".project-down-btn")) btn.disabled = disabled;
+  for (const btn of bulkActionsEl.querySelectorAll("button")) (btn as HTMLButtonElement).disabled = disabled;
 }
 
 function renderActionsTab(): void {
@@ -755,6 +1042,7 @@ async function handleAction(def: ActionDef): Promise<void> {
     actionsStatus.className = "actions-status ok";
     actionsStatus.textContent = `${def.label} succeeded.`;
     actionsStatus.hidden = false;
+    showToast("ok", `${def.label} "${containerName}" succeeded.`);
 
     await refreshCardList(); // state changed — the fleet list is stale either way
 
@@ -773,6 +1061,7 @@ async function handleAction(def: ActionDef): Promise<void> {
     actionsStatus.className = "actions-status error";
     actionsStatus.textContent = `${def.label} failed — see console.`;
     actionsStatus.hidden = false;
+    showToast("error", `${def.label} "${containerName}" failed — see console.`);
   } finally {
     actionInFlight = false;
     setActionButtonsDisabled(false);
@@ -788,21 +1077,23 @@ app.onerror = console.error;
 
 app.ontoolresult = (result) => {
   const payload = result.structuredContent as unknown as { containers: ContainerSummary[] } | undefined;
-  if (payload) renderCards(payload.containers);
+  if (payload) setContainers(payload.containers);
 };
 
 // Manual refresh (design doc §8 MVP) — re-calls the same model-facing tool.
 async function refreshCardList(): Promise<void> {
   refreshBtn.setAttribute("disabled", "true");
+  refreshIcon.classList.add("spinning");
   try {
     const result = await app.callServerTool({ name: "docker-ps", arguments: {} });
     if (result.isError) throw new Error("docker-ps returned an error");
     const payload = result.structuredContent as unknown as { containers: ContainerSummary[] };
-    renderCards(payload.containers);
+    setContainers(payload.containers);
   } catch (e) {
     console.error("Refresh failed:", e);
   } finally {
     refreshBtn.removeAttribute("disabled");
+    refreshIcon.classList.remove("spinning");
   }
 }
 refreshBtn.addEventListener("click", refreshCardList);

@@ -187,6 +187,9 @@ const ContainerDetailSchema = z.object({
   networks: z.array(z.string()),
   labels: z.record(z.string(), z.string()),
   ports: z.array(z.string()),
+  healthStatus: z.string().nullable(),
+  cpuLimitCores: z.number().nullable(),
+  memLimitBytes: z.number().nullable(),
 });
 
 const ContainerStatsSchema = z.object({

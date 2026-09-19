@@ -267,3 +267,63 @@ body {
   justify-content: flex-end;
   gap: 8px;
 }
+
+.confirm-dialog {
+  animation: dialog-in 0.15s ease-out;
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.toast-container {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: min(320px, calc(100vw - 32px));
+}
+
+.toast {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  animation: toast-in 0.2s ease-out;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.toast-ok {
+  border-color: var(--success);
+}
+
+.toast-error {
+  border-color: var(--danger);
+}
+
+.toast-leaving {
+  animation: toast-out 0.2s ease-in forwards;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; }
+  to { opacity: 0; transform: translateY(4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm-dialog, .toast, .toast-leaving {
+    animation: none;
+  }
+}

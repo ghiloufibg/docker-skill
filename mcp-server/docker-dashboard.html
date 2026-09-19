@@ -10,12 +10,54 @@
   <main class="main">
     <header class="header">
       <h1 class="title">Docker Fleet</h1>
-      <button id="refresh-btn" class="btn">Refresh</button>
+      <button id="refresh-btn" class="btn btn-with-icon">
+        <svg id="refresh-icon" class="icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M13.5 2.5v3.5H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Refresh
+      </button>
     </header>
 
+    <div class="fleet-toolbar">
+      <div class="fleet-search-wrap">
+        <svg class="icon fleet-search-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M14 14l-3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <input id="fleet-search" class="fleet-search" type="search" placeholder="Search name or image... (press / to focus)" aria-label="Search containers">
+      </div>
+      <select id="fleet-state-filter" class="fleet-select" aria-label="Filter by state">
+        <option value="all">All states</option>
+        <option value="running">Running</option>
+        <option value="paused">Paused</option>
+        <option value="exited">Exited</option>
+        <option value="other">Other</option>
+      </select>
+      <select id="fleet-sort" class="fleet-select" aria-label="Sort by">
+        <option value="name">Sort: Name</option>
+        <option value="state">Sort: State</option>
+        <option value="created">Sort: Newest first</option>
+      </select>
+    </div>
+
+    <div id="bulk-toolbar" class="bulk-toolbar" hidden>
+      <span id="bulk-count" class="bulk-count">0 selected</span>
+      <div id="bulk-actions" class="bulk-actions"></div>
+      <button id="bulk-clear-btn" class="btn btn-small">Clear</button>
+    </div>
+
     <div id="empty-state" class="empty-state" hidden>No containers found.</div>
+    <div id="fleet-no-matches" class="empty-state" hidden>No containers match the current search/filter.</div>
     <div id="fleet-status" class="actions-status" hidden></div>
-    <div id="card-list" class="card-list"></div>
+    <div id="card-list" class="card-list">
+      <!-- Static placeholder shown only until the first docker-ps result ever
+           arrives — renderCards() clears this via cardList.innerHTML = ""
+           on its very first call, so no JS is needed to manage it, and there's
+           no "blank until data arrives" flash on initial load. -->
+      <div class="card card-skeleton"><div class="skeleton-line skeleton-line-title"></div><div class="skeleton-line"></div><div class="skeleton-line skeleton-line-short"></div></div>
+      <div class="card card-skeleton"><div class="skeleton-line skeleton-line-title"></div><div class="skeleton-line"></div><div class="skeleton-line skeleton-line-short"></div></div>
+    </div>
 
     <section id="detail-panel" class="detail-panel" hidden>
       <div class="detail-header">
@@ -115,6 +157,8 @@
         </div>
       </div>
     </div>
+
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
   </main>
 
   <script type="module" src="./src/docker-dashboard.ts"></script>

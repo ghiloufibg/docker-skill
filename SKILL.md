@@ -1,9 +1,9 @@
 ---
 name: docker-skill-system-card
-description: MCP-UI/Docker Ops experiment in this repo, Stages 0-5 plus advanced features (the full staged plan). Shows a read-only local system card and a Docker fleet dashboard (list/inspect/logs/stats with optional live streaming, compose-project grouping with project-level teardown, plus tier-gated start/restart/pause/unpause/stop/kill/remove) as interactive MCP Apps, each with an "Investigate" button that hands root-cause analysis to the agent and has the agent report back via a structured investigation-report resource whose remediation suggestions can be gated one-click actions. Use when asked to test whether the current host renders MCP Apps UI resources, to check or manage local Docker containers through this repo's MCP server, or to continue the docker-skill design-to-implementation work described in docs/design/mcp-ui-docker-ops.md.
+description: MCP-UI/Docker Ops experiment in this repo, Stages 0-5 plus advanced features and a fourth round of functional/UI-UX additions (the full staged plan). Shows a read-only local system card and a Docker fleet dashboard (list/inspect/logs/stats with optional live streaming, health status and resource limits, search/filter/sort, compose-project grouping with project-level teardown, multi-select bulk actions, toast notifications, plus tier-gated start/restart/pause/unpause/stop/kill/remove) as interactive MCP Apps, each with an "Investigate" button that hands root-cause analysis to the agent and has the agent report back via a structured investigation-report resource whose remediation suggestions can be gated one-click actions. Use when asked to test whether the current host renders MCP Apps UI resources, to check or manage local Docker containers through this repo's MCP server, or to continue the docker-skill design-to-implementation work described in docs/design/mcp-ui-docker-ops.md.
 ---
 
-# docker-skill: MCP-UI spike, Stages 0-5 + advanced features (complete)
+# docker-skill: MCP-UI spike, Stages 0-5 + advanced features + round 4 (complete)
 
 `docs/design/mcp-ui-docker-ops.md` §11 laid out five stages, all five —
 plumbing spike, read-only dashboard, logs/stats, investigation report,
@@ -66,6 +66,21 @@ Inspect/Actions stay manual-refresh only, per §8's MVP — Logs/Stats gained
 the opt-in Live alternative above. An "Investigate" button appears on any
 non-`running` container, telling the agent to prefer this server's own
 tools over shelling out.
+
+**Round 4 additions** (design doc §11 item 8): client-side search/
+filter/sort over the card grid (no new tool); a health-status badge and
+CPU/memory resource limits in the Inspect tab (`docker-inspect`'s
+`healthStatus`/`cpuLimitCores`/`memLimitBytes`); per-card checkboxes and
+a bulk-action toolbar that shows only the actions valid for every
+selected container, Tier 2 bulk actions confirmed by typing the
+selection count rather than each name, and bulk tool calls run
+sequentially, not concurrently, for the same race-avoidance reason as
+the existing `actionInFlight` guard; and UI/UX polish — toast
+notifications (also ported into the investigation-report widget),
+loading skeletons for the card list and the detail panel (the latter
+now populated optimistically with the clicked container's already-known
+name instead of showing the previous container's stale data), a
+spinning refresh icon, and a `"/"`-to-focus-search shortcut.
 
 **Stage 3 — investigation report** (`build-investigation-report`,
 model-facing): both "Investigate" prompts end by telling the agent to

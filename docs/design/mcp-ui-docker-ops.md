@@ -597,6 +597,55 @@ before the next is started:
    item 4's update above confirms the mechanism works — there's still no
    real host to route it through, so the UI-dialog-plus-host-prompt
    layering from item 4 is what actually protects this too.
+8. *(not in the original numbered plan — round 4, functional +
+   UI/UX features on top of the already-complete staged plan)*
+   **Fleet dashboard search/filter/sort, richer container detail,
+   bulk actions, and UI/UX polish.** **Status: done.** Four additions,
+   all against the same `docker-dashboard.html`/`.ts`/`.css`:
+   - **Search/filter/sort** (`#fleet-toolbar`): a text search over
+     name/image, a state filter (running/paused/exited/other), and a
+     sort select (name/state/created), all computed client-side over
+     the existing `docker-ps` payload — no new tool, no new round trip.
+     A `"/"`-to-focus-search shortcut (the GitHub/Slack/Linear
+     convention) is guarded against hijacking a keystroke already going
+     to another input/textarea/select; Escape clears the box.
+   - **Richer detail**: `docker-inspect`'s `ContainerDetail` gained
+     `healthStatus` (from `State.Health?.Status`, `null` when the
+     container defines no `HEALTHCHECK` — a real "no data" case, not
+     an error, deliberately kept distinct from any status string),
+     and CPU/memory limits (`HostConfig.NanoCpus` for the modern
+     `--cpus` flag, falling back to the older cgroup-v1-style
+     `CpuQuota`/`CpuPeriod` ratio, then `null` if neither is set;
+     `HostConfig.Memory`, `0` treated as unlimited → `null`). Rendered
+     as a health badge next to the container name and a new "Resource
+     limits" section in the Inspect tab.
+   - **Bulk actions**: a per-card checkbox and a `#bulk-toolbar` that
+     appears once at least one is selected, showing only the actions
+     valid for *every* selected container's current state (the
+     intersection of each action's own `showIf(state)` across the
+     selection, reusing the same per-action `showIf` already used for
+     the single-container Actions tab). Tier 2 bulk actions ask the
+     user to type the **selection count** rather than each container's
+     name — re-typing every name doesn't scale, and the dialog states
+     plainly how many containers will be affected. Bulk calls run
+     **sequentially**, not `Promise.all` — round 2's concurrent-action
+     race (§12) was fixed once already and a bulk path re-introducing
+     it concurrently across N containers was not worth the risk for
+     the UX gain of finishing marginally faster.
+   - **UI/UX polish**: toast notifications (ported near-verbatim into
+     both `docker-dashboard.ts` and `investigation-report.ts`,
+     deliberately not shared as a module — see §10/guide §6.1 on why
+     nothing is shared between these independently-bundled resources)
+     layered *alongside*, not replacing, the existing persistent inline
+     status banners; a loading skeleton for the card list (static HTML
+     wiped by the first real `renderCards()` call — no extra JS state)
+     and for the detail panel (now populated optimistically from the
+     clicked card's already-known name before the `docker-inspect`
+     round trip resolves, rather than showing the *previous*
+     container's stale data until it does); a spinning refresh icon
+     during `docker-ps` refresh; a search icon; and a `transition` on
+     card hover/selection state. See §12's round-4 bullet for what a
+     rendering-based check did and didn't catch here.
 
 ## 12. Open questions / risks
 
@@ -777,6 +826,49 @@ before the next is started:
   and concurrent-action fixes from that round carried forward correctly
   into the new remediation-button dialog with no new bugs, which is
   itself a small data point for reusing hardened code over rewriting it.
+- **A fourth round — functional additions (search/filter/sort, richer
+  detail, bulk actions) plus UI/UX polish, described in §11 item 8 —
+  found one more rendering-only bug and two more caught by self-review
+  before a render was ever needed.** (12) `setContainers()` (the new
+  central point every `docker-ps` refresh flows through once search/
+  filter/sort landed) cleared `selectedIds` on every refresh but never
+  told the bulk toolbar to re-render, so completing a bulk action left
+  `#bulk-toolbar` visible with a stale "N selected" count even though
+  the selection had actually been cleared — invisible to code review
+  (nothing about the code *looks* wrong; the missing call is a bug of
+  omission), only caught because a Playwright check asserted the
+  toolbar's `hidden` state after the action resolved and got `false`
+  where it expected `true`. Fixed with one added `updateBulkToolbar()`
+  call. (13) and (14) were both caught by re-reading the new CSS/JS
+  before ever running it, the same discipline the `[hidden]` trap from
+  round 1 turned into a standing habit: a `.bulk-toolbar[hidden]` override
+  was added proactively rather than repeating the exact CSS-specificity
+  trap documented above, and the new toast layer's `@media
+  (prefers-reduced-motion: reduce)` rule (which disables the CSS
+  animation) was paired with a `setTimeout` fallback for the removal
+  that the code had originally made conditional on the animation's own
+  `animationend` event — an event a disabled animation never fires,
+  which would have left a dismissed toast's DOM node (and, functionally,
+  its space in the `column-reverse` stack) stuck forever for exactly the
+  accessibility-conscious users the media query exists to serve. Neither
+  of these needed a failing test to justify the fix, but stating them
+  here anyway matches this doc's own rule from round 1: a fix earns the
+  same rendering-based verification as the bug it fixes, not a pass on
+  code review alone — both were re-confirmed against the reference host
+  once built, not just reasoned about. One more thing this round's own
+  verification pass surfaced, not a bug: the optimistic detail-panel
+  skeleton (openDetail setting the clicked card's already-known name and
+  a loading skeleton before awaiting `docker-inspect`) could not be
+  visually confirmed by simply checking DOM state right after a
+  Playwright `.click()` resolves — in this sandbox, the full
+  iframe→host→MCP-server→Docker-daemon round trip for `docker-inspect`
+  completes in under 20ms, faster than the surrounding Playwright calls
+  themselves, so the skeleton was already gone by the time it was
+  checked. Confirmed instead with a `MutationObserver` timestamping every
+  `#detail-body` mutation, which showed the 4 skeleton rows genuinely
+  render before being replaced ~19ms later — the feature works, but "did
+  I actually see the loading state" isn't always answerable by looking,
+  only by instrumenting.
 
 ## 13. Recommended first spike (better test use case for Stage 0)
 

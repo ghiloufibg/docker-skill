@@ -98,6 +98,18 @@ async function main() {
       for (const key of detail.envKeys) {
         assert(!key.includes("="), "envKeys must contain names only, never key=value pairs (no leaked values)");
       }
+      assert(
+        detail.healthStatus === null || typeof detail.healthStatus === "string",
+        "healthStatus must be null or a string",
+      );
+      assert(
+        detail.cpuLimitCores === null || typeof detail.cpuLimitCores === "number",
+        "cpuLimitCores must be null or a number",
+      );
+      assert(
+        detail.memLimitBytes === null || typeof detail.memLimitBytes === "number",
+        "memLimitBytes must be null or a number",
+      );
 
       const dashboardTool = tools.find((t) => t.name === "docker-ps")!;
       const dashboardUri = (dashboardTool._meta as any)?.ui?.resourceUri;
@@ -209,10 +221,24 @@ async function main() {
     const lifecycleContainer = await docker.createContainer({
       Image: image,
       name: `docker-skill-smoke-lifecycle-${Date.now()}`,
+      HostConfig: { NanoCpus: 500_000_000, Memory: 100 * 1024 * 1024 }, // 0.5 CPU, 100MB — exercises the resource-limit fields
     });
     const lifecycleId = lifecycleContainer.id;
     try {
       await lifecycleContainer.start();
+
+      // Resource limits round-trip through docker-inspect (task: "richer
+      // container details") — confirmed against real HostConfig values,
+      // not just that the fields exist.
+      const limitsInspect = await client.callTool({ name: "docker-inspect", arguments: { id: lifecycleId } });
+      assert(!limitsInspect.isError, "docker-inspect must not error");
+      const limitsDetail = limitsInspect.structuredContent as any;
+      assert(limitsDetail.cpuLimitCores === 0.5, `cpuLimitCores must reflect the 0.5-CPU limit, got ${limitsDetail.cpuLimitCores}`);
+      assert(
+        limitsDetail.memLimitBytes === 100 * 1024 * 1024,
+        `memLimitBytes must reflect the 100MB limit, got ${limitsDetail.memLimitBytes}`,
+      );
+      console.log("docker-inspect OK: resource limits round-trip (0.5 CPU, 100MB)");
 
       const pauseResult = await client.callTool({ name: "docker-pause", arguments: { id: lifecycleId } });
       assert(!pauseResult.isError, "docker-pause must not error");

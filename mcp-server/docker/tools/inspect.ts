@@ -18,6 +18,14 @@ export interface ContainerDetail {
   networks: string[];
   labels: Record<string, string>;
   ports: string[];
+  // null when the image defines no HEALTHCHECK — distinct from any real
+  // status string ("starting"/"healthy"/"unhealthy"), so the UI can tell
+  // "no healthcheck configured" apart from "healthcheck hasn't run yet."
+  healthStatus: string | null;
+  // null when Docker reports no limit (HostConfig value of 0, i.e.
+  // "use everything the host has") — again distinct from an actual 0.
+  cpuLimitCores: number | null;
+  memLimitBytes: number | null;
 }
 
 export async function inspectContainer(id: string): Promise<ContainerDetail> {
@@ -39,6 +47,20 @@ export async function inspectContainer(id: string): Promise<ContainerDetail> {
         .join(", "),
     );
 
+  // NanoCpus (billionths of a CPU) is the modern `--cpus` flag; CpuQuota/
+  // CpuPeriod is the older cgroup-v1-style `--cpu-quota`/`--cpu-period`
+  // pair some tooling (including older compose files) still sets instead.
+  // Either can be present with the other at 0 — check NanoCpus first since
+  // it's the more common modern path, fall back to the quota/period ratio.
+  const hostConfig = data.HostConfig;
+  let cpuLimitCores: number | null = null;
+  if (hostConfig.NanoCpus) {
+    cpuLimitCores = hostConfig.NanoCpus / 1e9;
+  } else if (hostConfig.CpuQuota && hostConfig.CpuPeriod) {
+    cpuLimitCores = hostConfig.CpuQuota / hostConfig.CpuPeriod;
+  }
+  const memLimitBytes = hostConfig.Memory ? hostConfig.Memory : null;
+
   return {
     id: data.Id,
     name: data.Name.replace(/^\//, ""),
@@ -56,5 +78,8 @@ export async function inspectContainer(id: string): Promise<ContainerDetail> {
     networks,
     labels: data.Config.Labels ?? {},
     ports,
+    healthStatus: data.State.Health?.Status ?? null,
+    cpuLimitCores,
+    memLimitBytes,
   };
 }

@@ -78,6 +78,7 @@ const timelineList = document.getElementById("timeline-list")!;
 const evidenceList = document.getElementById("evidence-list")!;
 const remediationList = document.getElementById("remediation-list")!;
 const remediationStatus = document.getElementById("remediation-status")!;
+const toastContainer = document.getElementById("toast-container")!;
 const confirmOverlay = document.getElementById("confirm-overlay")!;
 const confirmTitle = document.getElementById("confirm-title")!;
 const confirmBody = document.getElementById("confirm-body")!;
@@ -86,6 +87,29 @@ const confirmTypeLabel = document.getElementById("confirm-type-label")!;
 const confirmTypeInput = document.getElementById("confirm-type-input") as HTMLInputElement;
 const confirmCancelBtn = document.getElementById("confirm-cancel-btn")!;
 const confirmOkBtn = document.getElementById("confirm-ok-btn") as HTMLButtonElement;
+
+// Same pattern (and same fallback-timer reasoning, see docker-dashboard.ts)
+// as the dashboard's own toast layer — kept as a near-verbatim, independent
+// copy rather than a shared module, matching how this widget already ports
+// showConfirm/dialogFocusables rather than importing them (no shared
+// runtime between separately-bundled resources — guide §12/"payload size").
+function showToast(kind: "ok" | "error", message: string): void {
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${kind}`;
+  toast.textContent = message;
+  toastContainer.appendChild(toast);
+  const timeoutMs = kind === "error" ? 6000 : 3500;
+  const remove = () => {
+    toast.classList.add("toast-leaving");
+    toast.addEventListener("animationend", () => toast.remove(), { once: true });
+    setTimeout(() => toast.remove(), 250);
+  };
+  const timer = setTimeout(remove, timeoutMs);
+  toast.addEventListener("click", () => {
+    clearTimeout(timer);
+    remove();
+  });
+}
 
 function escapeHtml(s: string): string {
   const div = document.createElement("div");
@@ -181,6 +205,7 @@ async function runRemediation(action: RemediationAction, runBtn: HTMLButtonEleme
     remediationStatus.className = "remediation-status ok";
     remediationStatus.textContent = `${label} "${action.id}" succeeded.`;
     remediationStatus.hidden = false;
+    showToast("ok", remediationStatus.textContent);
     runBtn.disabled = true;
     runBtn.textContent = "Done";
   } catch (e) {
@@ -188,6 +213,7 @@ async function runRemediation(action: RemediationAction, runBtn: HTMLButtonEleme
     remediationStatus.className = "remediation-status error";
     remediationStatus.textContent = `${label} "${action.id}" failed — see console.`;
     remediationStatus.hidden = false;
+    showToast("error", remediationStatus.textContent);
   } finally {
     actionInFlight = false;
     for (const btn of remediationList.querySelectorAll<HTMLButtonElement>(".remediation-run-btn")) {
