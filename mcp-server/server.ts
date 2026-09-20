@@ -30,6 +30,11 @@ import {
 } from "./docker/tools/actions.js";
 import { ensureSidecarStarted, SIDECAR_PORT } from "./docker/stream/sidecar.js";
 import { createLargeContentStore } from "./src/lib/large-content.js";
+import { DOCKER_ID_PATTERN } from "./docker/client.js";
+
+// Every tool input that names a container, not just a value this server
+// itself produced — see DOCKER_ID_PATTERN's own doc comment for why.
+const dockerIdSchema = z.string().regex(DOCKER_ID_PATTERN, "Invalid container id/name");
 
 const execFileAsync = promisify(execFile);
 
@@ -439,7 +444,7 @@ export function createServer(): McpServer {
         "exit code, mounts, networks, labels, ports, and env var *names* " +
         "(never values — see design doc §9). Local socket only.",
       annotations: { readOnlyHint: true, openWorldHint: false },
-      inputSchema: z.object({ id: z.string().describe("Container ID or name") }),
+      inputSchema: z.object({ id: dockerIdSchema.describe("Container ID or name") }),
       outputSchema: ContainerDetailSchema,
       _meta: { ui: { resourceUri: dashboardUri } },
     },
@@ -470,7 +475,7 @@ export function createServer(): McpServer {
         "Read-only, local socket only.",
       annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: z.object({
-        id: z.string().describe("Container ID or name"),
+        id: dockerIdSchema.describe("Container ID or name"),
         tail: z.number().int().positive().optional().describe("Number of lines to tail (default 100)"),
       }),
       outputSchema: z.object({ lines: z.array(z.string()) }),
@@ -506,7 +511,7 @@ export function createServer(): McpServer {
         "One-shot CPU/memory/network snapshot for a single container. " +
         "Read-only, local socket only.",
       annotations: { readOnlyHint: true, openWorldHint: false },
-      inputSchema: z.object({ id: z.string().describe("Container ID or name") }),
+      inputSchema: z.object({ id: dockerIdSchema.describe("Container ID or name") }),
       outputSchema: ContainerStatsSchema,
       _meta: { ui: { resourceUri: dashboardUri } },
     },
@@ -607,7 +612,7 @@ export function createServer(): McpServer {
   // requirement.
   // ===========================================================================
 
-  const containerIdInput = { id: z.string().describe("Container ID or name") };
+  const containerIdInput = { id: dockerIdSchema.describe("Container ID or name") };
 
   registerAppTool(
     server,

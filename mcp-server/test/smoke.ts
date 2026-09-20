@@ -89,6 +89,14 @@ async function main() {
       assert(typeof first.id === "string" && first.id.length > 0, "container id must be a non-empty string");
       assert(typeof first.state === "string", "container state must be a string");
 
+      // Regression test for the id-validation fix (dockerIdSchema in
+      // server.ts): a malformed id must be rejected by the tool's own
+      // input schema before it ever reaches dockerode's raw
+      // path-concatenated HTTP request.
+      const badIdResult = await client.callTool({ name: "docker-inspect", arguments: { id: "../etc/passwd" } });
+      assert(badIdResult.isError, "docker-inspect with a malformed id must error");
+      console.log("docker-inspect OK: malformed id rejected");
+
       const inspectResult = await client.callTool({ name: "docker-inspect", arguments: { id: first.id } });
       assert(!inspectResult.isError, "docker-inspect call must not error");
       const detail = inspectResult.structuredContent as any;
@@ -344,6 +352,21 @@ async function main() {
     const wrongTokenRes = await fetch(`http://127.0.0.1:${port}/stream/stats/${running[0].Id}?token=wrong`);
     assert(wrongTokenRes.status === 403, `wrong token must be rejected with 403, got ${wrongTokenRes.status}`);
     console.log("streaming sidecar OK: wrong token rejected with 403");
+
+    // Regression test for the id-validation fix: the route regex only
+    // excludes a literal `/` in the raw, still-percent-encoded path
+    // segment — decodeURIComponent can turn an encoded `%2F`/`%2E%2E`
+    // back into `/`/`..` afterward, so the *decoded* id needs its own
+    // check (see DOCKER_ID_PATTERN in docker/client.ts).
+    const traversalRes = await fetch(
+      `http://127.0.0.1:${port}/stream/stats/${encodeURIComponent("../etc/passwd")}?token=${token}`,
+    );
+    assert(traversalRes.status === 400, `id with '../' must be rejected with 400, got ${traversalRes.status}`);
+    const queryInjectionRes = await fetch(
+      `http://127.0.0.1:${port}/stream/stats/${encodeURIComponent("foo?evil=1")}?token=${token}`,
+    );
+    assert(queryInjectionRes.status === 400, `id with '?' must be rejected with 400, got ${queryInjectionRes.status}`);
+    console.log("streaming sidecar OK: malformed container id rejected with 400");
   }
 
   await client.close();

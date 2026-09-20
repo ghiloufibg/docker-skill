@@ -23,7 +23,7 @@
  */
 import crypto from "node:crypto";
 import http from "node:http";
-import { docker } from "../client.js";
+import { docker, DOCKER_ID_PATTERN } from "../client.js";
 import { computeStatsFromRaw } from "../tools/stats.js";
 
 const DEFAULT_PORT = 19943;
@@ -105,14 +105,30 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 
   const logsMatch = url.pathname.match(/^\/stream\/logs\/([^/]+)$/);
   const statsMatch = url.pathname.match(/^\/stream\/stats\/([^/]+)$/);
+  const rawId = logsMatch?.[1] ?? statsMatch?.[1];
 
-  if (logsMatch) {
-    await streamLogs(decodeURIComponent(logsMatch[1]), res);
-  } else if (statsMatch) {
-    await streamStats(decodeURIComponent(statsMatch[1]), res);
-  } else {
+  if (rawId === undefined) {
     res.writeHead(404);
     res.end();
+    return;
+  }
+
+  // The route regex above only excludes a literal `/` in the raw,
+  // still-percent-encoded path segment — decodeURIComponent can turn an
+  // encoded `%2F`/`%2E%2E` back into `/`/`..` afterward, so the decoded id
+  // still needs its own check before it reaches dockerode's raw
+  // path-concatenated HTTP request (see DOCKER_ID_PATTERN's doc comment).
+  const id = decodeURIComponent(rawId);
+  if (!DOCKER_ID_PATTERN.test(id)) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    res.end("invalid container id");
+    return;
+  }
+
+  if (logsMatch) {
+    await streamLogs(id, res);
+  } else {
+    await streamStats(id, res);
   }
 }
 
