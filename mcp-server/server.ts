@@ -303,7 +303,7 @@ const StreamInfoSchema = z.object({
 
 export function createServer(): McpServer {
   const server = new McpServer({
-    name: "docker-skill Stage-0 spike: local system card",
+    name: "docker-skill: Docker fleet dashboard and investigation UI",
     version: "0.1.0",
   });
 
