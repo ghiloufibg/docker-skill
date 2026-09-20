@@ -28,29 +28,48 @@ function showError(message: string) {
 }
 
 /**
+ * Reads the resource-level `_meta.ui.csp.connectDomains` escape hatch (a
+ * project-local convention, not part of the ext-apps SDK's own types --
+ * mirrors `_meta.ui.resourceUri`/`permissions` in passthrough.ts's
+ * getToolUiMeta, same trust boundary: this is the target server's own
+ * declared requirement, not third-party input). A widget legitimately
+ * needing outbound network access (e.g. this repo's own dashboard, whose
+ * live Logs/Stats stream from a loopback sidecar) declares the domains it
+ * needs here instead of the bridge guessing or leaving CSP wide open.
+ */
+function getResourceCsp(content: unknown): { connectDomains?: string[] } | undefined {
+  const meta = (content as { _meta?: Record<string, unknown> } | undefined)?._meta;
+  const ui = meta?.ui as Record<string, unknown> | undefined;
+  return ui?.csp as { connectDomains?: string[] } | undefined;
+}
+
+/**
  * Defense-in-depth on top of the iframe `sandbox` attribute: the sandbox
  * blocks same-origin/cookie/storage access, but nothing stops sandboxed
  * script from making its own outbound network calls or embedding further
  * frames. This bridge carries all real data over `postMessage`, which CSP
- * cannot see or restrict, so a rendered widget has no legitimate need for
- * `connect-src`/`frame-src` of its own — this denies both by default.
+ * cannot see or restrict, so by default a rendered widget has no
+ * legitimate need for `connect-src` beyond what its own resource declares
+ * via `getResourceCsp` above, and none at all for `frame-src`.
  * `font-src`/`img-src` allow `data:` because this repo's own widgets
  * (Vite's `vite-plugin-singlefile`) inline their fonts as base64 data URIs;
- * a third-party widget that legitimately needs live network access (e.g. a
- * map tile layer) will need this relaxed for its own deployment — see
- * README "Using this as a blueprint" for where to adapt it.
+ * a third-party widget that legitimately needs live network access it
+ * hasn't declared (e.g. a map tile layer) will need this relaxed for its
+ * own deployment — see README "Using this as a blueprint" for where to
+ * adapt it.
  */
-function injectDefaultCsp(html: string): string {
-  const csp = [
+function injectDefaultCsp(html: string, csp: { connectDomains?: string[] } | undefined): string {
+  const connectSrc = csp?.connectDomains?.length ? csp.connectDomains.join(" ") : "'none'";
+  const directives = [
     "default-src 'none'",
     "script-src 'unsafe-inline'",
     "style-src 'unsafe-inline'",
     "font-src data:",
     "img-src data:",
-    "connect-src 'none'",
+    `connect-src ${connectSrc}`,
     "frame-src 'none'",
   ].join("; ");
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${directives}">`;
   return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (tag) => `${tag}${meta}`) : `${meta}${html}`;
 }
 
@@ -95,6 +114,7 @@ async function main() {
   const content = resource.contents[0];
   const html = content && "text" in content ? content.text : undefined;
   if (!html) throw new Error(`Resource ${session.resourceUri} did not return HTML text content`);
+  const resourceCsp = getResourceCsp(content);
 
   const iframe = document.createElement("iframe");
   // No `allow-same-origin`: the view gets an opaque, unique origin — it
@@ -164,7 +184,7 @@ async function main() {
   // Set content only after the bridge is already listening, so the view's
   // own `ui/initialize` handshake (fired as soon as its script runs) is
   // never missed.
-  iframe.srcdoc = injectDefaultCsp(html);
+  iframe.srcdoc = injectDefaultCsp(html, resourceCsp);
 }
 
 main().catch((err) => {
