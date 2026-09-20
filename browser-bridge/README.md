@@ -266,3 +266,35 @@ actual browser rendering and the live `tools/call` round trip from inside
 the iframe — that needs a real browser (Playwright was used for this
 during development; there's no reason not to wire it into `test/` too if
 you're extending this and want that automated).
+
+## Code quality
+
+```bash
+npm run lint   # eslint, type-aware
+npm run build  # includes a real type-check of src/browser/** now — see below
+```
+
+`src/browser/main.ts` — the file most worth getting right, since it's the
+actual `AppBridge`/`PostMessageTransport` wiring a fork of this project
+would copy — went unchecked by `tsc` for this project's entire history:
+`tsconfig.json` explicitly excludes `src/browser/**` (it has no DOM lib,
+the Node-side config), and Vite/esbuild only *transpile* TypeScript during
+bundling, never type-check it. `tsconfig.browser.json` (DOM + DOM.Iterable
+lib, `noEmit`) closes that gap and is now a real step in `npm run build` —
+a type error in the browser code fails the build, same as everywhere else
+in this project, instead of only surfacing as a runtime failure in someone's
+actual browser.
+
+ESLint (`eslint.config.js`, flat config, type-aware via `typescript-eslint`)
+runs against an explicit `project` array covering all three tsconfigs
+(`projectService`'s auto-discovery only recognizes files literally named
+`tsconfig.json` while walking up directories, which misses this project's
+deliberately-split `tsconfig.browser.json`/`tsconfig.test.json` — worth
+knowing if you add a fourth). First real run found and fixed genuine bugs,
+not just style: two floating promises in `main.ts` (`sendToolInput`/
+`sendToolResult` results were neither awaited nor `.catch()`'d — a rejection
+from either would have become a silent unhandled rejection), an unsafe `any`
+chain from `JSON.parse` flowing into a `Buffer.concat` argument and an
+object spread in `ui-server.ts`'s `handleAppMessage`, and six now-redundant
+`as never` casts in `passthrough.ts` left over from earlier, more
+defensive versions of that code.

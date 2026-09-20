@@ -17,7 +17,7 @@ export interface ToolUiMeta {
  * `_meta["ui/resourceUri"]` form, either of which must start with `ui://`.
  */
 function getToolUiMeta(tool: Partial<Tool>): ToolUiMeta | undefined {
-  const meta = tool._meta as Record<string, unknown> | undefined;
+  const meta = tool._meta;
   const nested = meta?.ui as Record<string, unknown> | undefined;
   const uri = (nested?.resourceUri as string | undefined) ?? (meta?.["ui/resourceUri"] as string | undefined);
   if (uri === undefined) return undefined;
@@ -73,13 +73,13 @@ export function createPassthroughServer(backend: Client, hook: UiHook): Server {
 
     switch (method) {
       case "tools/list": {
-        const result = await backend.listTools(params as never);
+        const result = await backend.listTools(params);
         toolsByName = new Map(result.tools.map((t) => [t.name, t]));
         return result;
       }
       case "tools/call": {
         const callParams = params as { name: string; arguments?: Record<string, unknown> };
-        const result = await backend.callTool(callParams as never);
+        const result = await backend.callTool(callParams);
 
         if (!result.isError) {
           // A well-behaved client always calls tools/list before tools/call,
@@ -106,13 +106,13 @@ export function createPassthroughServer(backend: Client, hook: UiHook): Server {
         return result;
       }
       case "resources/list":
-        return backend.listResources(params as never);
+        return backend.listResources(params);
       case "resources/templates/list":
-        return backend.listResourceTemplates(params as never);
+        return backend.listResourceTemplates(params);
       case "resources/read":
         return backend.readResource(params as never);
       case "prompts/list":
-        return backend.listPrompts(params as never);
+        return backend.listPrompts(params);
       case "prompts/get":
         return backend.getPrompt(params as never);
       case "completion/complete":

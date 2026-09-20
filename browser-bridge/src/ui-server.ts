@@ -261,6 +261,8 @@ export class UiBridge {
     const mcpServer = createPassthroughServer(backend, {
       // Browser-originated tool calls never need to re-trigger the bridge —
       // this hook only exists for the CLI-facing server (passthrough.ts).
+      // UiHook requires a Promise-returning callback; nothing to await here.
+      // eslint-disable-next-line @typescript-eslint/require-await
       onUiToolResult: async () => undefined,
     });
     const transport = new NodeStreamableHTTPServerTransport({
@@ -307,11 +309,17 @@ export class UiBridge {
 
   private handleAppMessage(req: http.IncomingMessage, res: http.ServerResponse): void {
     const chunks: Buffer[] = [];
-    req.on("data", (c) => chunks.push(c));
+    req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
       void (async () => {
         try {
-          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          // Parsed into `unknown`, not trusted as any particular shape --
+          // this is the one place in the bridge that handles a payload the
+          // *widget* controls (an agent-authored ui/message call), not one
+          // this process generated itself, so it gets the narrower
+          // treatment passthrough.ts's own trust-boundary comments describe.
+          const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          const body = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
           // v1, deliberate limitation: this bridge is a detached process, not
           // the live CLI conversation, so it cannot inject a real turn into
           // it. It surfaces the request loudly (stderr) AND durably (a JSON

@@ -29,7 +29,11 @@ function showError(message: string) {
 
 async function main() {
   const raw = document.getElementById("bridge-session")!.textContent ?? "{}";
-  const session: BridgeSession = JSON.parse(raw);
+  // Explicit assertion, not an inferred/annotated assignment: this is our
+  // own bridge process's own generated bootstrap payload (see ui-server.ts
+  // -- same trust boundary already crossed the same way throughout
+  // passthrough.ts), not third-party input worth a runtime schema check.
+  const session = JSON.parse(raw) as BridgeSession;
 
   const client = new Client({ name: "mcp-apps-browser-bridge-view", version: "0.1.0" });
   const mcpUrl = new URL(session.mcpUrl, window.location.origin);
@@ -72,7 +76,7 @@ async function main() {
   // single-iframe simplification of the spec's documented double-iframe
   // sandbox-proxy pattern (see README "Known gaps").
   iframe.setAttribute("sandbox", "allow-scripts allow-forms");
-  const allow = buildAllowAttribute(session.permissions as never);
+  const allow = buildAllowAttribute(session.permissions);
   if (allow) iframe.setAttribute("allow", allow);
   frameWrap.appendChild(iframe);
 
@@ -84,8 +88,16 @@ async function main() {
 
   bridge.oninitialized = () => {
     setStatus("Ready", "ready");
-    bridge.sendToolInput({ arguments: session.toolArgs });
-    bridge.sendToolResult(session.toolResult);
+    // oninitialized itself must stay synchronous (the SDK's own type is
+    // `() => void`, not `() => Promise<void>`) so these two can't be
+    // awaited here -- but a rejection from either must not just vanish as
+    // an unhandled promise rejection, so both get an explicit .catch.
+    bridge.sendToolInput({ arguments: session.toolArgs }).catch((err: unknown) => {
+      console.error("[mcp-apps-browser-bridge] sendToolInput failed:", err);
+    });
+    bridge.sendToolResult(session.toolResult).catch((err: unknown) => {
+      console.error("[mcp-apps-browser-bridge] sendToolResult failed:", err);
+    });
   };
 
   bridge.onsizechange = ({ width, height }) => {
@@ -93,6 +105,10 @@ async function main() {
     if (height != null) iframe.style.height = `${height}px`;
   };
 
+  // window.open is synchronous, but AppBridge's own type requires this
+  // callback to return Promise<McpUiOpenLinkResult>, so `async` stays even
+  // with nothing to actually await.
+  // eslint-disable-next-line @typescript-eslint/require-await
   bridge.onopenlink = async ({ url }) => {
     window.open(url, "_blank", "noopener,noreferrer");
     return {};
@@ -110,7 +126,7 @@ async function main() {
         body: JSON.stringify(params),
       });
       return {};
-    } catch (err) {
+    } catch {
       return { isError: true };
     }
   };

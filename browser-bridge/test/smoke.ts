@@ -102,7 +102,7 @@ async function main(): Promise<void> {
   assert(linkBlock?.type === "text", "UI-enabled tool result must have a link block appended");
   const match = linkBlock.text.match(/http:\/\/127\.0\.0\.1:\d+\/app\/[a-f0-9-]+\?token=[\w-]+/);
   assert(match, "link block must contain a well-formed session URL");
-  const sessionUrl = match![0];
+  const sessionUrl = match[0];
   console.log(`UI link injection ok: ${sessionUrl}`);
 
   // The session page itself renders (200, real HTML, the bootstrap payload
