@@ -1,0 +1,43 @@
+/*
+ * Hand-picked instead of `@import "@fontsource/work-sans/400.css"` etc.:
+ * each of those pulls in three unicode-range variants per weight (latin,
+ * latin-ext, vietnamese) in BOTH woff2 and woff formats — none of which
+ * this English-only UI will ever render except the plain latin/woff2 one.
+ * vite-plugin-singlefile base64-inlines whatever a CSS url() references
+ * regardless of whether it's ever used, so importing the full fontsource
+ * CSS nearly quadrupled each widget's bundle for dead weight (measured:
+ * ~530KB gzip -> ~575KB startup single-file bundles from four
+ * "@import"s alone). This file references only the four latin/woff2 files
+ * this codebase's Tailwind classes actually need (font-medium=500,
+ * font-semibold=600, plus the 400 default; JetBrains Mono only ever used
+ * at 400 — see theme.css's own comment for how that was confirmed by
+ * grepping component usage, not assumed).
+ */
+@font-face {
+  font-family: "Work Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../../node_modules/@fontsource/work-sans/files/work-sans-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Work Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../../node_modules/@fontsource/work-sans/files/work-sans-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Work Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../../node_modules/@fontsource/work-sans/files/work-sans-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+}

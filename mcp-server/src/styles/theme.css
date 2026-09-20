@@ -1,6 +1,18 @@
 @import "tailwindcss";
 
 /*
+ * Self-hosted, bundled into each widget's single-file HTML alongside
+ * everything else — same rationale as gimle-console's own main.tsx (the
+ * source this theme was transplanted from): a runtime Google Fonts CDN
+ * dependency would defeat the "no network calls" constraint these widgets
+ * already operate under (docs/design/mcp-ui-docker-ops.md §1) and could
+ * block first paint inside the sandboxed iframe entirely. See fonts.css
+ * for why this imports hand-picked @font-face rules instead of
+ * @fontsource's own per-weight CSS.
+ */
+@import "./fonts.css";
+
+/*
  * The dual light/dark mechanism below is unchanged from the vanilla-CSS
  * version — see docs/guides/building-mcp-ui-servers.md §8: a host's own
  * theme toggle sets [data-theme] on documentElement (applyDocumentTheme),
@@ -8,54 +20,84 @@
  * required or a host-driven theme switch silently does nothing.
  */
 /*
- * --muted/--warning/--danger/--success below are darker than the values
- * a color picker would first reach for (#6b7280/#f59e0b/#ef4444/#22c55e)
- * — those looked fine by eye but fail WCAG AA's 4.5:1 text-contrast
- * threshold on a white background (axe-core measured 4.44/2.15/3.76/2.28
- * respectively; round 5's Radix migration made the confirm dialogs'
- * focus handling correct by construction, but didn't touch color, so
- * this was still open). --accent is left as-is: it's only ever used as
- * a background/border/ring color in this codebase, never as text color,
- * so its lower text-contrast ratio never applies. Dark mode's own shades
- * already clear 4.5:1 with a lot of margin (6.8-11.5:1, measured) and
- * are untouched.
+ * Palette transplanted from gimle-console (C:\Users\PC\IdeaProjects\gimle\
+ * gimle-console\src\styles.css) at the user's request — same "mint signal
+ * on deep navy" identity, same oklch() values, mapped onto this project's
+ * existing (smaller) token set (--bg/--fg/--muted/--border/--accent/
+ * --warning/--danger/--success/--card) rather than renaming every
+ * Tailwind utility class across ~20 already-built, already-accessibility-
+ * audited component files to gimle's full shadcn vocabulary — zero
+ * component changes needed for color, verified by grep (no bg-background/
+ * text-foreground/bg-primary usage anywhere in this codebase; every
+ * component already uses this project's own smaller vocabulary
+ * exclusively).
+ *
+ * Every value below was run through the same WCAG AA verification this
+ * file's previous revision (Round 6, axe-core audit) established as the
+ * standard — computed via the oklch -> linear-sRGB -> relative-luminance
+ * pipeline, not eyeballed. A direct, unmodified transplant of gimle's
+ * light-mode values would have reintroduced exactly the class of bug
+ * Round 6 fixed:
+ *   - text-warning on bg: gimle's oklch(0.62 0.17 70) measured 3.60:1
+ *     (needs 4.5:1) -> darkened to oklch(0.54 0.17 70), same hue/chroma,
+ *     measures 5.00:1.
+ *   - white text on accent (gimle's own light-mode primary/primary-
+ *     foreground pairing): oklch(1 0 0) on oklch(0.55 0.13 172) measured
+ *     4.40:1 in light mode and a stark 1.82:1 in dark mode (a light mint
+ *     accent in dark mode cannot take white text at all). Fixed by adding
+ *     an --accent-foreground token instead of hardcoding white text
+ *     (button.tsx's accent variant now uses text-accent-foreground) —
+ *     gimle's own system already does exactly this for --primary-
+ *     foreground; this project's button.tsx just hadn't needed the concept
+ *     before. Light-mode accent nudged from L=0.55 to L=0.60 (same
+ *     chroma/hue) so accent-foreground's dark text clears 4.5:1 (measures
+ *     4.74:1); dark-mode accent kept at gimle's exact L=0.79 with a dark
+ *     navy foreground (measures 9.93:1).
+ * Everything else (bg/fg/muted/border/danger/success, and all of dark
+ * mode) is gimle's value unchanged — each already cleared 4.5:1 as-is
+ * (muted 6.18:1, danger 5.20:1, success 4.74:1 light; muted 7.46:1,
+ * warning 10.54:1, danger 6.19:1, success 11.01:1 dark).
  */
 :root {
-  --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #5f6b7a;
-  --border: #e5e7eb;
-  --accent: #3b82f6;
-  --warning: #b45309;
-  --danger: #b91c1c;
-  --success: #15803d;
-  --card: #ffffff;
+  --radius: 0.25rem;
+  --bg: oklch(0.985 0.005 170);
+  --fg: oklch(0.22 0.03 220);
+  --muted: oklch(0.48 0.03 200);
+  --border: oklch(0.9 0.015 185);
+  --accent: oklch(0.6 0.13 172);
+  --accent-foreground: oklch(0.22 0.03 220);
+  --warning: oklch(0.54 0.17 70);
+  --danger: oklch(0.55 0.21 20);
+  --success: oklch(0.52 0.14 165);
+  --card: oklch(1 0 0);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0b0f19;
-    --fg: #f3f4f6;
-    --muted: #9ca3af;
-    --border: #2a3242;
-    --accent: #60a5fa;
-    --warning: #fbbf24;
-    --danger: #f87171;
-    --success: #4ade80;
-    --card: #131a2a;
+    --bg: oklch(0.2 0.035 248);
+    --fg: oklch(0.92 0.07 158);
+    --muted: oklch(0.72 0.05 172);
+    --border: oklch(0.34 0.04 195);
+    --accent: oklch(0.79 0.14 172);
+    --accent-foreground: oklch(0.2 0.035 248);
+    --warning: oklch(0.83 0.16 80);
+    --danger: oklch(0.7 0.19 18);
+    --success: oklch(0.82 0.15 165);
+    --card: oklch(0.245 0.035 235);
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #0b0f19;
-  --fg: #f3f4f6;
-  --muted: #9ca3af;
-  --border: #2a3242;
-  --accent: #60a5fa;
-  --warning: #fbbf24;
-  --danger: #f87171;
-  --success: #4ade80;
-  --card: #131a2a;
+  --bg: oklch(0.2 0.035 248);
+  --fg: oklch(0.92 0.07 158);
+  --muted: oklch(0.72 0.05 172);
+  --border: oklch(0.34 0.04 195);
+  --accent: oklch(0.79 0.14 172);
+  --accent-foreground: oklch(0.2 0.035 248);
+  --warning: oklch(0.83 0.16 80);
+  --danger: oklch(0.7 0.19 18);
+  --success: oklch(0.82 0.15 165);
+  --card: oklch(0.245 0.035 235);
 }
 
 /*
@@ -74,10 +116,22 @@
   --color-muted: var(--muted);
   --color-border: var(--border);
   --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-success: var(--success);
   --color-card: var(--card);
+
+  /* Also from gimle-console: a single --radius drives Tailwind's whole
+     rounded-sm/md/lg/xl scale, so every existing rounded-md/rounded-lg
+     usage in this codebase picks up gimle's sharper "instrument panel"
+     corners with no component changes. */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "Work Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --animate-fade-in: fade-in 0.15s ease-out;
   --animate-dialog-in: dialog-in 0.15s ease-out;
@@ -124,7 +178,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
 }
 
