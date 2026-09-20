@@ -12,7 +12,7 @@
  * claudedocs/qa-report-claude-code-cli-e2e.md for why `system-info` isn't a
  * safe pick for this.
  */
-import { Client } from "@modelcontextprotocol/client";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -113,6 +113,29 @@ async function main(): Promise<void> {
   assert(pageBody.includes("resourceUri"), "session page must contain the bootstrap payload");
   assert(!pageBody.includes("__BRIDGE_SESSION__"), "placeholder must have been substituted, not left literal");
   console.log("session page renders ok");
+
+  // Regression test: /mcp must support multiple independent browser
+  // sessions concurrently. Previously it didn't — a single shared
+  // transport/server meant a second browser tab's `initialize` failed with
+  // "Invalid Request: Server already initialized" (see ui-server.ts's
+  // handleMcpRequest doc comment for the fix). Two real
+  // StreamableHTTPClientTransport connections, exactly as two browser tabs
+  // would each open one, is what actually exercises this — a single
+  // shared connection would never have caught it.
+  {
+    const token = new URL(sessionUrl).searchParams.get("token")!;
+    const mcpUrl = new URL("/mcp", sessionUrl);
+    const authInit = { requestInit: { headers: { Authorization: `Bearer ${token}` } } };
+    const sessionA = new Client({ name: "smoke-session-a", version: "0.1.0" });
+    const sessionB = new Client({ name: "smoke-session-b", version: "0.1.0" });
+    await sessionA.connect(new StreamableHTTPClientTransport(mcpUrl, authInit));
+    await sessionB.connect(new StreamableHTTPClientTransport(mcpUrl, authInit));
+    const [toolsA, toolsB] = await Promise.all([sessionA.listTools(), sessionB.listTools()]);
+    assert(toolsA.tools.length === 16, `session A must see all 16 tools, got ${toolsA.tools.length}`);
+    assert(toolsB.tools.length === 16, `session B must see all 16 tools, got ${toolsB.tools.length}`);
+    await Promise.all([sessionA.close(), sessionB.close()]);
+  }
+  console.log("multi-session /mcp: two independent browser sessions both initialized ok");
 
   // Auth gates: wrong/missing token on both endpoints must be rejected, not
   // silently served.

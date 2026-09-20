@@ -5,13 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>MCP Apps Browser Bridge</title>
 <style>
-  html, body { height: 100%; margin: 0; background: #1e1e1e; color: #e6e6e6; font-family: system-ui, sans-serif; }
-  #status { padding: 8px 14px; font-size: 13px; background: #252525; border-bottom: 1px solid #383838; display: flex; align-items: center; gap: 8px; }
+  /*
+   * Not `position: absolute` on #frame-wrap (the previous approach): the
+   * iframe's height is overridden to a JS pixel value by main.ts's
+   * onsizechange handler (driven by the widget's own reported content
+   * size), which can exceed an absolutely-positioned, viewport-height-
+   * constrained container — the iframe would then overflow it, and this
+   * page's own dark body background showed through as a stray black bar
+   * below shorter widgets. Normal block flow avoids the conflict
+   * structurally: the iframe just grows the page, no container fighting
+   * a JS-set height. min-height keeps the page filled before the first
+   * size-changed event arrives. Light body background (not a jarring dark
+   * one) means any residual one-frame seam is unnoticeable regardless.
+   */
+  html, body { margin: 0; background: #f5f5f5; color: #1a1a1a; font-family: system-ui, sans-serif; }
+  #status { position: sticky; top: 0; z-index: 1; padding: 8px 14px; font-size: 13px; background: #252525; color: #e6e6e6; border-bottom: 1px solid #383838; display: flex; align-items: center; gap: 8px; }
   #status .dot { width: 8px; height: 8px; border-radius: 50%; background: #f0ad4e; }
   #status.ready .dot { background: #5cb85c; }
   #status.error .dot { background: #d9534f; }
-  #frame-wrap { position: absolute; top: 34px; left: 0; right: 0; bottom: 0; }
-  iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+  iframe { width: 100%; min-height: calc(100vh - 34px); border: 0; display: block; background: #fff; }
   #error { padding: 16px; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 13px; color: #ff8080; }
 </style>
 </head>

@@ -70,20 +70,26 @@ const DiskUsageSchema = z.object({
 });
 type DiskUsage = z.infer<typeof DiskUsageSchema>;
 
-async function getDiskUsage(target = "/"): Promise<DiskUsage> {
-  // `df -kP` is available on every POSIX system this is expected to run on;
-  // parsed instead of shelling out to a heavier dependency for one number.
-  const { stdout } = await execFileAsync("df", ["-kP", target]);
-  const line = stdout.trim().split("\n").at(-1) ?? "";
-  const fields = line.trim().split(/\s+/);
-  const totalKb = Number(fields[1] ?? 0);
-  const availableKb = Number(fields[3] ?? 0);
-  const usedPercent = Number((fields[4] ?? "0").replace("%", ""));
+async function getDiskUsage(target: string): Promise<DiskUsage> {
+  // Was `df -kP` shelled out and text-parsed — broke on every Windows
+  // execution context tested (see claudedocs/qa-report-claude-code-cli-e2e.md):
+  // ENOENT when df isn't on PATH (a Claude Code CLI session launched
+  // normally has no reason to have Git's usr/bin on PATH), and NaN/failed
+  // schema validation even when a df.exe *was* reachable (Git Bash's
+  // coreutils df output didn't match the assumed column format). Node's
+  // fs.statfs is cross-platform (Windows included, since Node 18.15) and
+  // needs no external process at all — this is the fix the QA report
+  // already called out, not a new design.
+  const stats = await fs.statfs(target);
+  const totalBytes = stats.blocks * stats.bsize;
+  const availableBytes = stats.bavail * stats.bsize;
+  const usedBytes = totalBytes - stats.bfree * stats.bsize;
+  const usedPercent = totalBytes > 0 ? (usedBytes / totalBytes) * 100 : 0;
   return {
     path: target,
     usedPercent,
-    totalBytes: totalKb * 1024,
-    availableBytes: availableKb * 1024,
+    totalBytes,
+    availableBytes,
   };
 }
 
@@ -311,7 +317,10 @@ export function createServer(): McpServer {
   // The repo this server is running from — used for the git-status row.
   // Local-only by construction: no path outside the process's own cwd is ever read.
   const watchRepoPath = process.cwd();
-  const watchDiskPath = "/";
+  // Cross-platform disk root: "/" on POSIX, the current drive (e.g. "C:\\")
+  // on Windows — fs.statfs needs a path that actually exists on the host
+  // filesystem, and Windows has no single "/" to statfs.
+  const watchDiskPath = path.parse(process.cwd()).root;
 
   // Model-facing tool (Tier 0, read-only, per design doc §4): static info +
   // one disk-usage/git-status snapshot, gathered once when the tool is called.

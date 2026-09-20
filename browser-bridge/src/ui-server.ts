@@ -14,13 +14,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // from the tsc-compiled Node code (dist/) so the two builds never collide.
 const WRAPPER_HTML_PATH = path.join(__dirname, "..", "dist-browser", "wrapper.html");
 
-interface Session {
+interface AppSession {
   id: string;
   toolName: string;
   toolArgs: Record<string, unknown> | undefined;
   toolResult: CallToolResult;
   uiMeta: ToolUiMeta;
   expiresAt: number;
+}
+
+interface McpSession {
+  transport: NodeStreamableHTTPServerTransport;
+  backend: Client;
+  lastActivityAt: number;
 }
 
 export interface UiBridgeOptions {
@@ -30,7 +36,7 @@ export interface UiBridgeOptions {
   port?: number;
   /** Auto-launch the system browser when a new session is registered (default true). */
   autoOpen?: boolean;
-  /** How long an unopened session link stays valid, in ms (default 30 min). */
+  /** How long an unopened session link — or an idle browser MCP connection — stays valid, in ms (default 30 min). */
   sessionTtlMs?: number;
   /**
    * File that `ui/message` payloads (the "Investigate"-button mechanism —
@@ -52,16 +58,25 @@ export interface UiBridgeOptions {
  *  - `GET  /app/:sessionId?token=...`  the human-facing page (host wrapper +
  *    sandboxed iframe for the View), gated by a per-process random token.
  *  - `ANY  /mcp`                        the browser's own MCP connection,
- *    gated by the same token via `Authorization: Bearer`, forwarded to a
- *    dedicated backend Client (see spawn-backend.ts) so the View's own
- *    `tools/call`/`resources/read` requests reach the real server.
+ *    gated by the same token via `Authorization: Bearer`.
+ *
+ * `/mcp` supports any number of independent browser sessions concurrently —
+ * each gets its own dedicated backend connection and passthrough server,
+ * keyed by the `Mcp-Session-Id` the transport negotiates on `initialize`
+ * (the standard multi-session Streamable HTTP pattern; see
+ * `WebStandardStreamableHTTPServerTransportOptions.onsessioninitialized`'s
+ * own doc comment: "Useful in cases when you need to register multiple mcp
+ * sessions and need to keep track of them"). A single shared transport
+ * would reject any second browser tab's `initialize` outright — verified
+ * the hard way: opening two links against one bridge process previously
+ * produced `Invalid Request: Server already initialized`.
  */
 export class UiBridge {
   private readonly opts: Required<UiBridgeOptions>;
   private readonly token = randomBytes(24).toString("base64url");
-  private readonly sessions = new Map<string, Session>();
+  private readonly appSessions = new Map<string, AppSession>();
+  private readonly mcpSessions = new Map<string, McpSession>();
   private server: http.Server | undefined;
-  private backend: Client | undefined;
   private cleanupTimer: NodeJS.Timeout | undefined;
   private baseUrl = "";
   private starting: Promise<void> | undefined;
@@ -86,7 +101,7 @@ export class UiBridge {
     await this.ensureStarted();
 
     const id = randomUUID();
-    this.sessions.set(id, {
+    this.appSessions.set(id, {
       id,
       toolName,
       toolArgs,
@@ -113,12 +128,15 @@ export class UiBridge {
     };
   }
 
-  /** Closes the local HTTP server and its dedicated backend connection. Idempotent. */
+  /** Closes the local HTTP server and every open browser MCP session's backend connection. Idempotent. */
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
-    await this.backend?.close().catch(() => undefined);
+    await Promise.allSettled(
+      [...this.mcpSessions.values()].map((s) => Promise.allSettled([s.transport.close(), s.backend.close()])),
+    );
+    this.mcpSessions.clear();
     await new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
   }
 
@@ -140,16 +158,6 @@ export class UiBridge {
   }
 
   private async start(): Promise<void> {
-    const backend = await this.opts.spawnBackend();
-    this.backend = backend;
-    const mcpServer = createPassthroughServer(backend, {
-      // Browser-originated tool calls never need to re-trigger the bridge —
-      // this hook only exists for the CLI-facing server (passthrough.ts).
-      onUiToolResult: async () => undefined,
-    });
-    const httpTransport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
-    await mcpServer.connect(httpTransport);
-
     const validateHost = localhostHostValidation();
     const wrapperTemplate = await fs.readFile(WRAPPER_HTML_PATH, "utf-8");
 
@@ -160,14 +168,14 @@ export class UiBridge {
 
       if (url.pathname === "/mcp") {
         if (!this.hasValidToken(req, url)) return this.deny(res);
-        void httpTransport.handleRequest(req, res);
+        void this.handleMcpRequest(req, res);
         return;
       }
 
       const appMatch = url.pathname.match(/^\/app\/([^/]+)$/);
       if (appMatch) {
         if (url.searchParams.get("token") !== this.token) return this.deny(res);
-        const session = this.sessions.get(appMatch[1]);
+        const session = this.appSessions.get(appMatch[1]);
         if (!session || session.expiresAt < Date.now()) {
           res.writeHead(404, { "content-type": "text/plain" }).end("Unknown or expired session");
           return;
@@ -208,18 +216,81 @@ export class UiBridge {
     const port = typeof address === "object" && address ? address.port : this.opts.port;
     this.baseUrl = `http://127.0.0.1:${port}`;
     this.server = server;
-    // Sessions are small (a tool result each) but unbounded without this —
-    // a long-running bridge process that keeps getting UI-bearing tool
-    // calls would otherwise leak memory for the life of the process.
-    this.cleanupTimer = setInterval(() => this.sweepExpiredSessions(), 60_000);
+    // Sessions are small but unbounded without this — a long-running bridge
+    // process that keeps getting UI-bearing tool calls, or browser tabs
+    // that get closed without a clean MCP session teardown, would
+    // otherwise leak memory (and, for mcpSessions, leaked child processes)
+    // for the life of the process.
+    this.cleanupTimer = setInterval(() => {
+      this.sweepExpiredAppSessions();
+      void this.sweepIdleMcpSessions();
+    }, 60_000);
     this.cleanupTimer.unref?.(); // never keep the process alive on its own
     console.error(`[browser-bridge] local UI companion listening on ${this.baseUrl} (loopback only)`);
   }
 
-  private sweepExpiredSessions(): void {
+  /**
+   * Routes an `/mcp` request to its existing browser session's transport,
+   * or — for a request with no (or an unrecognized) `Mcp-Session-Id`
+   * header, i.e. a fresh `initialize` — spins up a brand new dedicated
+   * backend connection + passthrough server + transport for it. Each
+   * browser tab that opens a link gets full isolation from every other one,
+   * the same way the CLI-facing side already has its own dedicated
+   * connection (see spawn-backend.ts).
+   */
+  private async handleMcpRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const sessionIdHeader = req.headers["mcp-session-id"];
+    const existing = typeof sessionIdHeader === "string" ? this.mcpSessions.get(sessionIdHeader) : undefined;
+    if (existing) {
+      existing.lastActivityAt = Date.now();
+      await existing.transport.handleRequest(req, res);
+      return;
+    }
+
+    let backend: Client;
+    try {
+      backend = await this.opts.spawnBackend();
+    } catch (err) {
+      console.error(`[browser-bridge] could not start backend for new browser session: ${(err as Error).message}`);
+      res.writeHead(502, { "content-type": "application/json" }).end(
+        JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "Backend unavailable" }, id: null }),
+      );
+      return;
+    }
+
+    const mcpServer = createPassthroughServer(backend, {
+      // Browser-originated tool calls never need to re-trigger the bridge —
+      // this hook only exists for the CLI-facing server (passthrough.ts).
+      onUiToolResult: async () => undefined,
+    });
+    const transport = new NodeStreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (sessionId) => {
+        this.mcpSessions.set(sessionId, { transport, backend, lastActivityAt: Date.now() });
+      },
+      onsessionclosed: (sessionId) => {
+        const session = this.mcpSessions.get(sessionId);
+        this.mcpSessions.delete(sessionId);
+        void session?.backend.close().catch(() => undefined);
+      },
+    });
+    await mcpServer.connect(transport);
+    await transport.handleRequest(req, res);
+  }
+
+  private sweepExpiredAppSessions(): void {
     const now = Date.now();
-    for (const [id, session] of this.sessions) {
-      if (session.expiresAt < now) this.sessions.delete(id);
+    for (const [id, session] of this.appSessions) {
+      if (session.expiresAt < now) this.appSessions.delete(id);
+    }
+  }
+
+  private async sweepIdleMcpSessions(): Promise<void> {
+    const cutoff = Date.now() - this.opts.sessionTtlMs;
+    const idle = [...this.mcpSessions.entries()].filter(([, s]) => s.lastActivityAt < cutoff);
+    for (const [id, session] of idle) {
+      this.mcpSessions.delete(id);
+      await Promise.allSettled([session.transport.close(), session.backend.close()]);
     }
   }
 

@@ -69,7 +69,6 @@ async function main() {
   };
 
   bridge.onsizechange = ({ width, height }) => {
-    if (height != null) frameWrap.style.height = "";
     if (width != null) iframe.style.width = `${width}px`;
     if (height != null) iframe.style.height = `${height}px`;
   };

@@ -43,8 +43,9 @@ Claude Code CLI  <--stdio-->  [this bridge, one process]  <--stdio-->  [spawned 
                       wrapper page: Client -> StreamableHTTPClientTransport
                       -> AppBridge -> sandboxed iframe (the actual widget)
                                        |
-                          same HTTP server, forwarded to a SECOND
-                          spawned instance of the target server
+                       same HTTP server's /mcp endpoint, each browser tab
+                       getting its OWN spawned instance of the target
+                       server (see "Multi-session" below)
 ```
 
 The bridge presents itself to your MCP host exactly like the real server —
@@ -57,13 +58,37 @@ naming a browser link before relaying the result upstream — the underlying
 data the model reasons over is unchanged. If a tool has no UI resource, the
 bridge is a no-op passthrough.
 
-Two independent instances of the target server are spawned (one servicing
-the CLI-facing side, one the browser-facing side, the second one lazily —
-see `src/ui-server.ts`) rather than multiplexing one child's stdio pipe.
-That's simpler and avoids JSON-RPC id collisions, at the cost of assuming
-your target server keeps no meaningful in-process state of its own (state
-should live in whatever external system the tools actually talk to — true
-of this repo's own server, whose only state is the real Docker daemon).
+Independent instances of the target server are spawned per logical
+connection (one for the CLI-facing side; one *per browser session* on the
+UI-facing side — see "Multi-session" below) rather than multiplexing one
+child's stdio pipe. That's simpler and avoids JSON-RPC id collisions, at
+the cost of assuming your target server keeps no meaningful in-process
+state of its own (state should live in whatever external system the tools
+actually talk to — true of this repo's own server, whose only state is the
+real Docker daemon).
+
+### Multi-session
+
+The `/mcp` endpoint supports any number of concurrent browser sessions —
+open a dozen tabs against a dozen different tool-call links from the same
+bridge process and each gets its own fully isolated backend connection.
+This isn't incidental: a naive single-shared-transport implementation was
+the first version, and it broke on exactly this — a second browser tab's
+`initialize` request failed outright with `Invalid Request: Server already
+initialized`, since one `NodeStreamableHTTPServerTransport` connected to
+one passthrough server can only ever complete one MCP handshake. The fix
+(`UiBridge.handleMcpRequest` in `src/ui-server.ts`) is the standard
+multi-session Streamable HTTP pattern: requests carrying no (or an
+unrecognized) `Mcp-Session-Id` header get a brand-new backend + passthrough
+server + transport spun up for them; the transport's own
+`onsessioninitialized`/`onsessionclosed` callbacks key a session map so
+subsequent requests for that session route to the same transport instead
+of starting a new one. Idle sessions (no explicit close, e.g. a tab just
+left open) are swept after `--session-ttl` minutes, same as unopened
+tool-call links.
+`test/smoke.ts` has a regression test for this specifically — two real
+`StreamableHTTPClientTransport` connections against the same `/mcp` URL,
+both expected to complete `initialize` and list tools successfully.
 
 ## Usage
 
@@ -161,7 +186,8 @@ real safety net, and it requires nothing from the wrapped server beyond
 bridge targets.
 
 On top of that, `cli.ts` installs `SIGINT`/`SIGTERM` handlers that close
-both backend connections and the local HTTP server explicitly, for the
+the CLI-facing backend connection, every open browser session's backend
+connection and transport, and the local HTTP server itself, for the
 *graceful* shutdown path (e.g. an interactive Ctrl-C) where they actually
 get a chance to run — useful for the tidy log line and prompt release, not
 required for correctness.
@@ -169,9 +195,11 @@ required for correctness.
 Long-running-process concerns this pass specifically addressed:
 
 - **Session memory leak**: every UI-bearing tool call used to add an entry
-  to an in-memory map that nothing ever removed. Sessions now expire after
-  `--session-ttl` minutes (default 30) and are swept every 60s
-  (`src/ui-server.ts`'s `sweepExpiredSessions`).
+  to an in-memory map that nothing ever removed. Unopened tool-call links
+  now expire after `--session-ttl` minutes (default 30) and are swept every
+  60s (`sweepExpiredAppSessions`); browser MCP sessions left idle that
+  long (no explicit close, e.g. a tab left open) are swept the same way
+  (`sweepIdleMcpSessions`), closing their transport and backend connection.
 - **Stuck startup**: if the lazy local HTTP server's first start attempt
   fails (e.g. the OS-picked port raced with something else), the bridge
   used to permanently re-await (and re-throw from) that same rejected
@@ -228,8 +256,10 @@ npm run smoke    # builds, then runs test/smoke.ts against ../mcp-server
 rejected cleanly, a nonexistent target command failing fast instead of
 hanging, the full passthrough (`tools/list` count, a UI-enabled
 `tools/call` getting its link appended), the session page actually
-rendering with the bootstrap payload substituted in, both HTTP endpoints'
-auth gates (missing/wrong token → 403), and an unknown session id → 404.
+rendering with the bootstrap payload substituted in, two independent
+`/mcp` browser sessions both completing `initialize` concurrently (the
+multi-session regression test — see above), both HTTP endpoints' auth
+gates (missing/wrong token → 403), and an unknown session id → 404.
 
 What it does **not** cover (verified manually instead, see the QA report):
 actual browser rendering and the live `tools/call` round trip from inside

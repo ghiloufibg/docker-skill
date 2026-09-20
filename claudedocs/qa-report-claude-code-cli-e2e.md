@@ -61,6 +61,19 @@ wrapping `system-info`/`system-poll` in a try/catch that degrades
 gracefully (`disk: null` + a note) the way `getGitStatus` already does
 (`server.ts:97-114`), instead of hard-failing the whole tool call.
 
+> **Update (same day, later pass): fixed.** `getDiskUsage` now uses
+> `fs.statfs` exactly as suggested above, with the disk-root path resolved
+> cross-platform (`path.parse(process.cwd()).root` — `/` on POSIX, `C:\` on
+> Windows — rather than a hardcoded `/`). Re-verified both failure modes
+> directly: `system-info` now returns real data from a native PowerShell
+> process *and* from Git Bash, no `df` dependency left to fail either way.
+> `npm run smoke` now passes in full on this machine for the first time in
+> this project's Windows testing history. The try/catch graceful-degradation
+> suggestion was *not* taken — `fs.statfs` failing at all would mean the
+> host filesystem itself is unreachable, at which point a hard tool error is
+> arguably more honest than silently reporting `disk: null`. Left as a
+> deliberate choice, not an oversight, if revisited later.
+
 ### 3. HIGH — confirms the repo's open question: **Claude Code CLI does not render MCP Apps `ui://` resources**
 Verified two independent ways in live sessions:
 - Reading `ui://docker-dashboard/docker-dashboard.html` via
