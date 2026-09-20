@@ -1,13 +1,21 @@
-export interface ContainerSummary {
-  id: string;
-  name: string;
-  image: string;
-  state: string;
-  status: string;
-  createdAt: string;
-  project: string | null;
-  exitCode: number | null;
-}
+import { z } from "zod";
+
+export const ContainerSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  image: z.string(),
+  state: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  project: z.string().nullable(),
+  exitCode: z.number().nullable(),
+});
+export type ContainerSummary = z.infer<typeof ContainerSummarySchema>;
+
+// What docker-ps's ontoolresult push actually delivers — see
+// src/lib/uiAppStore.ts for why this is the one boundary in this app
+// worth a real schema instead of a cast.
+export const DockerPsResultSchema = z.object({ containers: z.array(ContainerSummarySchema) });
 
 export interface ContainerDetail {
   id: string;
