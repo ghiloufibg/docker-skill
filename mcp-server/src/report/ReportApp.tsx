@@ -116,7 +116,7 @@ export function ReportApp() {
                       size="sm"
                       variant={done ? "outline" : TIER1_TOOLS.has(item.action.tool) ? "default" : "danger"}
                       disabled={actionInFlight || done}
-                      onClick={() => runRemediation(item.action!, key)}
+                      onClick={() => void runRemediation(item.action!, key)}
                     >
                       {done ? "Done" : "Run"}
                     </Button>

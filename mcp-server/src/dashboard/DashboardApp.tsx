@@ -36,14 +36,25 @@ export function DashboardApp() {
   // Every docker-ps result (initial render, manual refresh, or the
   // refresh a bulk/project-down action triggers afterward) arrives through
   // the same SDK callback — bridge it into local state and reset the bulk
-  // selection, matching the vanilla setContainers().
-  React.useEffect(() => {
+  // selection, matching the vanilla setContainers(). Applied during render
+  // (React's own documented "adjusting state when a prop changes" pattern:
+  // https://react.dev/learn/you-might-not-need-an-effect), not in a
+  // useEffect — an effect-based setState here would commit once with the
+  // stale allContainers, then immediately re-render with the new value, an
+  // extra flash-then-correct render on every incoming update. A `useRef`
+  // for the "previous incoming" marker doesn't work here: react-hooks'
+  // stricter (React Compiler-aligned) rules forbid reading/writing
+  // `ref.current` during render at all, so this needs its own `useState`,
+  // exactly as react.dev's example does.
+  const [prevIncoming, setPrevIncoming] = React.useState(incoming);
+  if (incoming !== prevIncoming) {
+    setPrevIncoming(incoming);
     if (incoming) {
       setAllContainers(incoming);
       setHasLoadedOnce(true);
       setSelectedIds(new Set());
     }
-  }, [incoming]);
+  }
 
   // "/" focuses search (GitHub/Slack/Linear convention), skipped while
   // already typing into any input/textarea/select.
@@ -84,7 +95,7 @@ export function DashboardApp() {
     try {
       const result = await app.callServerTool({ name: "docker-ps", arguments: {} });
       if (result.isError) throw new Error("docker-ps returned an error");
-      const payload = result.structuredContent as unknown as { containers: ContainerSummary[] };
+      const payload = result.structuredContent as { containers: ContainerSummary[] };
       setAllContainers(payload.containers);
       setHasLoadedOnce(true);
       setSelectedIds(new Set());
@@ -201,6 +212,17 @@ export function DashboardApp() {
         toast.error(`${def.label}: ${succeeded}/${targets.length} succeeded, ${failed.length} failed.`, { duration: 6000 });
       }
       await refreshCardList();
+    } catch (e) {
+      // Per-container failures are already caught and reported above —
+      // this only catches something outside that loop (refreshCardList
+      // itself is self-contained and shouldn't throw, but relying on that
+      // implicitly, unlike every sibling handler here having its own
+      // top-level catch, would leave this one one edit away from becoming
+      // an unhandled rejection now that onAction passes it directly as a
+      // React event handler).
+      console.error("Bulk action failed:", e);
+      setFleetStatus({ kind: "error", text: `${def.label} failed unexpectedly — see console.` });
+      toast.error(`${def.label} failed unexpectedly — see console.`, { duration: 6000 });
     } finally {
       setActionInFlight(false);
     }
@@ -245,7 +267,7 @@ export function DashboardApp() {
     <main className="main mx-auto max-w-2xl p-4">
       <header className="mb-3 flex items-center justify-between">
         <h1 className="text-base font-semibold">Docker Fleet</h1>
-        <Button variant="outline" size="sm" onClick={refreshCardList} disabled={refreshing}>
+        <Button variant="outline" size="sm" onClick={() => void refreshCardList()} disabled={refreshing}>
           <RefreshCw className={refreshing ? "animate-spin" : ""} />
           Refresh
         </Button>
@@ -263,7 +285,11 @@ export function DashboardApp() {
         />
       </div>
 
-      <BulkToolbar selected={selected} onClear={() => setSelectedIds(new Set())} onAction={handleBulkAction} />
+      <BulkToolbar
+        selected={selected}
+        onClear={() => setSelectedIds(new Set())}
+        onAction={(def, targets) => void handleBulkAction(def, targets)}
+      />
 
       {!hasAnyContainers && hasLoadedOnce && <div className="py-6 text-center text-sm text-muted">No containers found.</div>}
       {noMatches && <div className="py-6 text-center text-sm text-muted">No containers match the current search/filter.</div>}
@@ -279,8 +305,8 @@ export function DashboardApp() {
           selectedIds={selectedIds}
           onSelectChange={toggleSelect}
           onOpen={detail.open}
-          onInvestigate={investigate}
-          onProjectDown={handleProjectDown}
+          onInvestigate={(c) => void investigate(c)}
+          onProjectDown={(project, members) => void handleProjectDown(project, members)}
         />
       )}
 
@@ -289,7 +315,7 @@ export function DashboardApp() {
           detailState={detail}
           actionInFlight={actionInFlight}
           actionsStatus={actionsStatus}
-          onAction={handleAction}
+          onAction={(def) => void handleAction(def)}
           onClose={detail.close}
         />
       )}

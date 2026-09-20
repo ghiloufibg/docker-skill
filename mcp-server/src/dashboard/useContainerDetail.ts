@@ -62,7 +62,7 @@ export function useContainerDetail() {
     try {
       const result = await app.callServerTool({ name: "stream-info", arguments: {} });
       if (result.isError) throw new Error("stream-info returned an error");
-      streamInfoRef.current = result.structuredContent as unknown as StreamInfo;
+      streamInfoRef.current = result.structuredContent as StreamInfo;
       return streamInfoRef.current;
     } catch (e) {
       console.error("stream-info failed:", e);
@@ -74,7 +74,7 @@ export function useContainerDetail() {
     try {
       const result = await app.callServerTool({ name: "docker-inspect", arguments: { id } });
       if (result.isError) throw new Error("docker-inspect returned an error");
-      setDetail(result.structuredContent as unknown as ContainerDetail);
+      setDetail(result.structuredContent as ContainerDetail);
     } catch (e) {
       console.error("docker-inspect failed:", e);
     } finally {
@@ -113,7 +113,7 @@ export function useContainerDetail() {
     try {
       const result = await app.callServerTool({ name: "docker-logs", arguments: { id: containerId, tail: 100 } });
       if (result.isError) throw new Error("docker-logs returned an error");
-      const { lines } = result.structuredContent as unknown as { lines: string[] };
+      const { lines } = result.structuredContent as { lines: string[] };
       setLogs((s) => ({ ...s, loading: false, content: lines.length > 0 ? lines.join("\n") : "(no log output)" }));
     } catch (e) {
       console.error("docker-logs failed:", e);
@@ -127,7 +127,7 @@ export function useContainerDetail() {
     try {
       const result = await app.callServerTool({ name: "docker-stats", arguments: { id: containerId } });
       if (result.isError) throw new Error("tool returned an error");
-      const data = result.structuredContent as unknown as ContainerStats;
+      const data = result.structuredContent as ContainerStats;
       setStats((s) => ({ ...s, data, status: null }));
     } catch (e) {
       // Expected for a stopped container — Docker's stats endpoint only
@@ -172,7 +172,11 @@ export function useContainerDetail() {
       source.onmessage = (ev) => {
         let data: { line?: string; error?: string };
         try {
-          data = JSON.parse(ev.data) as { line?: string; error?: string };
+          // MessageEvent.data is typed `any` in lib.dom.d.ts (it covers
+          // every EventSource/WebSocket payload shape, not just text) —
+          // this sidecar's own SSE stream (sseHeaders/sendEvent in
+          // docker/stream/sidecar.ts) only ever writes JSON text.
+          data = JSON.parse(ev.data as string) as { line?: string; error?: string };
         } catch {
           setLogs((s) => ({ ...s, liveStatus: "Live update dropped (malformed data)." }));
           return;
@@ -212,7 +216,7 @@ export function useContainerDetail() {
       source.onmessage = (ev) => {
         let data: ContainerStats | { error: string };
         try {
-          data = JSON.parse(ev.data) as ContainerStats | { error: string };
+          data = JSON.parse(ev.data as string) as ContainerStats | { error: string };
         } catch {
           setStats((s) => ({ ...s, status: "Live update dropped (malformed data)." }));
           return;

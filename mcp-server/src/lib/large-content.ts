@@ -94,7 +94,7 @@ export function createLargeContentStore(server: McpServer): LargeContentStore {
         opts.name,
         uri,
         { description: opts.description, mimeType },
-        async () => ({ contents: [{ uri, mimeType, text }] }),
+        () => ({ contents: [{ uri, mimeType, text }] }),
       );
       // Not a leak-prevention afterthought — every ephemeral resource is
       // scheduled for removal the moment it's created, same TTL-sweep

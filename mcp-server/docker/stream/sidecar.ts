@@ -23,6 +23,7 @@
  */
 import crypto from "node:crypto";
 import http from "node:http";
+import type Docker from "dockerode";
 import { docker, DOCKER_ID_PATTERN } from "../client.js";
 import { computeStatsFromRaw } from "../tools/stats.js";
 
@@ -217,7 +218,7 @@ async function streamStats(id: string, res: http.ServerResponse): Promise<void> 
     let startedAt: string;
     try {
       startedAt = (await docker.getContainer(id).inspect()).State.StartedAt;
-      nodeStream = (await docker.getContainer(id).stats({ stream: true })) as unknown as NodeJS.ReadableStream;
+      nodeStream = await docker.getContainer(id).stats({ stream: true });
     } catch {
       if (attempt === 0) {
         sendEvent(res, { error: "container not found or not running" });
@@ -227,7 +228,7 @@ async function streamStats(id: string, res: http.ServerResponse): Promise<void> 
       await delay(Math.min(500 * attempt, 3000));
       continue;
     }
-    currentStream = nodeStream as NodeJS.ReadableStream & { destroy?: () => void };
+    currentStream = nodeStream;
 
     let buffer = "";
     nodeStream.on("data", (chunk: Buffer) => {
@@ -238,7 +239,11 @@ async function streamStats(id: string, res: http.ServerResponse): Promise<void> 
         buffer = buffer.slice(idx + 1);
         if (!line.trim()) continue;
         try {
-          sendEvent(res, computeStatsFromRaw(JSON.parse(line)));
+          // Our own dockerode stream's own per-tick JSON, not attacker
+          // input (see computeStatsFromRaw's doc comment) — a schema check
+          // here would just duplicate what the `try` above already covers
+          // for a malformed/split line.
+          sendEvent(res, computeStatsFromRaw(JSON.parse(line) as Docker.ContainerStats));
         } catch {
           // A line split across two chunks — the next newline resyncs.
         }
@@ -295,7 +300,7 @@ async function streamLogs(id: string, res: http.ServerResponse): Promise<void> {
       const info = await docker.getContainer(id).inspect();
       isTty = Boolean(info.Config.Tty);
       startedAt = info.State.StartedAt;
-      nodeStream = (await docker.getContainer(id).logs({
+      nodeStream = await docker.getContainer(id).logs({
         stdout: true,
         stderr: true,
         follow: true,
@@ -305,7 +310,7 @@ async function streamLogs(id: string, res: http.ServerResponse): Promise<void> {
         // just-computed `since` would. Every reconnect uses `since`.
         ...(attempt === 0 ? { tail: 0 } : { since: sinceUnixSeconds }),
         timestamps: true,
-      })) as unknown as NodeJS.ReadableStream;
+      });
     } catch {
       if (attempt === 0) {
         sendEvent(res, { error: "container not found" });
@@ -315,7 +320,7 @@ async function streamLogs(id: string, res: http.ServerResponse): Promise<void> {
       await delay(Math.min(500 * attempt, 3000));
       continue;
     }
-    currentStream = nodeStream as NodeJS.ReadableStream & { destroy?: () => void };
+    currentStream = nodeStream;
 
     let buffer = Buffer.alloc(0);
     const emitLines = (text: string) => {

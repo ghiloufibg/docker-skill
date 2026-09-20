@@ -18,7 +18,7 @@ const listeners = new Set<Listener>();
 let latestResult: SystemInfoResult | null = null;
 
 app.ontoolresult = (result) => {
-  const payload = result.structuredContent as unknown as SystemInfoResult | undefined;
+  const payload = result.structuredContent as SystemInfoResult | undefined;
   if (payload) {
     latestResult = payload;
     for (const l of listeners) l();
@@ -39,6 +39,9 @@ function handleHostContextChanged(ctx: McpUiHostContext): void {
   if (ctx.theme) applyDocumentTheme(ctx.theme);
   if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
   if (ctx.safeAreaInsets) {
+    // See docker-dashboard's mcp.ts for why this cast (and the disable
+    // below) is genuinely needed, not redundant.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const mainEl = document.querySelector(".main") as HTMLElement | null;
     if (mainEl) {
       mainEl.style.paddingTop = `${ctx.safeAreaInsets.top}px`;

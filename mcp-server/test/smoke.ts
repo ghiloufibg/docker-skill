@@ -345,7 +345,7 @@ async function main() {
     const statsUrl = `http://127.0.0.1:${port}/stream/stats/${running[0].Id}?token=${token}`;
     const firstEvent = await readOneSseEvent(statsUrl, 5000);
     assert(firstEvent !== null, "stats stream must emit at least one event within 5s");
-    const parsed = JSON.parse(firstEvent!);
+    const parsed = JSON.parse(firstEvent);
     assert(typeof parsed.cpuPercent === "number", "streamed stats event must look like ContainerStats");
     console.log(`streaming sidecar OK: live stats event received (cpuPercent=${parsed.cpuPercent})`);
 

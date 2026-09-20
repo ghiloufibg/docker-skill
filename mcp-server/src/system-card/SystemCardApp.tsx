@@ -31,13 +31,28 @@ export function SystemCardApp() {
     };
   }, [incoming]);
 
+  // See dashboard/DashboardApp.tsx's own incoming-sync block for why this
+  // runs during render (React's documented "adjusting state when a prop
+  // changes" pattern) via a `useState` marker rather than a useEffect.
+  // repoPathRef can't move into this same branch, unlike the setState
+  // calls below: react-hooks forbids writing `ref.current` during render
+  // unconditionally, even gated behind "did incoming actually change" —
+  // confirmed by the linter, not just assumed — so it keeps its own
+  // effect instead, which is what a ref write with no accompanying
+  // setState is actually for.
+  const [prevIncoming, setPrevIncoming] = React.useState(incoming);
+  if (incoming !== prevIncoming) {
+    setPrevIncoming(incoming);
+    if (incoming) {
+      setTotalMemBytes(incoming.system.totalMemBytes);
+      setDisk(incoming.disk);
+      setFreeMemBytes(incoming.freeMemBytes);
+      setUptime(formatUptime(incoming.uptimeSeconds));
+    }
+  }
+
   React.useEffect(() => {
-    if (!incoming) return;
-    repoPathRef.current = incoming.git?.repoPath ?? "";
-    setTotalMemBytes(incoming.system.totalMemBytes);
-    setDisk(incoming.disk);
-    setFreeMemBytes(incoming.freeMemBytes);
-    setUptime(formatUptime(incoming.uptimeSeconds));
+    if (incoming) repoPathRef.current = incoming.git?.repoPath ?? "";
   }, [incoming]);
 
   async function refresh() {
@@ -45,7 +60,7 @@ export function SystemCardApp() {
     try {
       const result = await app.callServerTool({ name: "system-poll", arguments: {} });
       if (result.isError) throw new Error("system-poll returned an error");
-      const stats = result.structuredContent as unknown as PollStats;
+      const stats = result.structuredContent as PollStats;
       setDisk(stats.disk);
       setFreeMemBytes(stats.freeMemBytes);
       setUptime(formatUptime(stats.uptimeSeconds));
@@ -88,7 +103,7 @@ export function SystemCardApp() {
     <main className="main mx-auto max-w-sm p-4">
       <header className="mb-3 flex items-center justify-between">
         <h1 className="text-base font-semibold">System</h1>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
+        <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={refreshing}>
           <RefreshCw className={refreshing ? "animate-spin" : ""} />
           Refresh
         </Button>
@@ -133,7 +148,7 @@ export function SystemCardApp() {
             size="sm"
             variant="outline"
             className="border-warning text-warning hover:bg-warning/10"
-            onClick={investigate}
+            onClick={() => void investigate()}
             disabled={investigating}
           >
             Investigate

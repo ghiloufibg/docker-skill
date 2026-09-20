@@ -540,7 +540,7 @@ export function createServer(): McpServer {
       outputSchema: StreamInfoSchema,
       _meta: { ui: { visibility: ["app"] } },
     },
-    async (): Promise<CallToolResult> => {
+    (): CallToolResult => {
       const info = ensureSidecarStarted();
       return { content: [{ type: "text", text: JSON.stringify(info) }], structuredContent: info };
     },
@@ -581,7 +581,7 @@ export function createServer(): McpServer {
       outputSchema: InvestigationReportSchema,
       _meta: { ui: { resourceUri: reportUri } },
     },
-    async (report): Promise<CallToolResult> => {
+    (report): CallToolResult => {
       return {
         // The agent wrote every field of `report` as this call's own
         // arguments a moment ago — echoing the full object back in

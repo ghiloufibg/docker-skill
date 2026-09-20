@@ -53,8 +53,8 @@ export function DetailPanel({ detailState: d, actionInFlight, actionsStatus, onA
             loading={d.logs.loading}
             live={d.logs.live}
             liveStatus={d.logs.liveStatus}
-            onRefresh={d.loadLogs}
-            onLiveChange={d.toggleLogsLive}
+            onRefresh={() => void d.loadLogs()}
+            onLiveChange={(on) => void d.toggleLogsLive(on)}
           />
         </TabsContent>
         <TabsContent value="stats">
@@ -63,8 +63,8 @@ export function DetailPanel({ detailState: d, actionInFlight, actionsStatus, onA
             status={d.stats.status}
             live={d.stats.live}
             history={d.stats.history}
-            onRefresh={d.loadStats}
-            onLiveChange={d.toggleStatsLive}
+            onRefresh={() => void d.loadStats()}
+            onLiveChange={(on) => void d.toggleStatsLive(on)}
           />
         </TabsContent>
         <TabsContent value="actions">

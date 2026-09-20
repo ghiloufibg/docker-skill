@@ -31,7 +31,7 @@ export async function getContainerLogs(id: string, tail = DEFAULT_TAIL): Promise
     container.inspect(),
     container.logs({ stdout: true, stderr: true, tail, timestamps: true, follow: false }),
   ]);
-  const buf = rawLogs as unknown as Buffer;
+  const buf = rawLogs;
   // A TTY container's logs are already plain text — demuxing would corrupt them.
   if (info.Config.Tty) {
     return buf.toString("utf-8").split("\n").filter((l) => l.length > 0);

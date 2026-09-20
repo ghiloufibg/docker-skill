@@ -19,7 +19,7 @@ const containerListeners = new Set<Listener>();
 let latestContainers: ContainerSummary[] | null = null;
 
 app.ontoolresult = (result) => {
-  const payload = result.structuredContent as unknown as { containers: ContainerSummary[] } | undefined;
+  const payload = result.structuredContent as { containers: ContainerSummary[] } | undefined;
   if (payload) {
     latestContainers = payload.containers;
     for (const l of containerListeners) l();
@@ -41,6 +41,15 @@ function handleHostContextChanged(ctx: McpUiHostContext): void {
   if (ctx.theme) applyDocumentTheme(ctx.theme);
   if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
   if (ctx.safeAreaInsets) {
+    // Not actually unnecessary: `document.querySelector(".main")` resolves
+    // to the generic `<E extends Element = Element>` overload (".main" isn't
+    // a recognized tag-name literal), so tsc infers `Element | null`, which
+    // has no `.style` property. Confirmed by running the real `tsc -p
+    // tsconfig.json` build with this cast removed: TS2339 on every
+    // `.style.*` access below. A known false-positive class for
+    // typescript-eslint's type-aware check on this exact querySelector
+    // pattern, not a real redundant assertion.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const mainEl = document.querySelector(".main") as HTMLElement | null;
     if (mainEl) {
       mainEl.style.paddingTop = `${ctx.safeAreaInsets.top}px`;

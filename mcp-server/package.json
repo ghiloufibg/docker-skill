@@ -14,7 +14,8 @@
     "watch:dashboard": "cross-env INPUT=docker-dashboard.html vite build --watch",
     "watch:report": "cross-env INPUT=investigation-report.html vite build --watch",
     "start:stdio": "node dist/index.js --stdio",
-    "smoke": "npm run build 1>&2 && node dist/test/smoke.js"
+    "smoke": "npm run build 1>&2 && node dist/test/smoke.js",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
@@ -40,6 +41,7 @@
     "zod": "^4.2.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/client": "2.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/dockerode": "^4.0.1",
@@ -47,8 +49,11 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "cross-env": "^10.1.0",
+    "eslint": "^10.11.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0",
     "vite": "^6.0.0",
     "vite-plugin-singlefile": "^2.3.0"
   }
