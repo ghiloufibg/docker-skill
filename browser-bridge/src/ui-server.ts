@@ -272,6 +272,7 @@ export class UiBridge {
         const session = this.mcpSessions.get(sessionId);
         this.mcpSessions.delete(sessionId);
         void session?.backend.close().catch(() => undefined);
+        console.error(`[browser-bridge] browser session ${sessionId} closed, backend released`);
       },
     });
     await mcpServer.connect(transport);

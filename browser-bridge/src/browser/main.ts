@@ -34,7 +34,27 @@ async function main() {
   const client = new Client({ name: "mcp-apps-browser-bridge-view", version: "0.1.0" });
   const mcpUrl = new URL(session.mcpUrl, window.location.origin);
   const transport = new StreamableHTTPClientTransport(mcpUrl, {
-    requestInit: { headers: { Authorization: `Bearer ${session.token}` } },
+    // `keepalive` lets the DELETE below actually reach the server during
+    // page unload — a normal fetch gets cancelled the instant the page
+    // starts navigating away, `keepalive: true` is the standard platform
+    // mechanism for "let this specific request survive that." No body on
+    // a DELETE, so none of this touches keepalive's ~64KB request cap.
+    requestInit: { headers: { Authorization: `Bearer ${session.token}` }, keepalive: true },
+  });
+
+  // Resource-efficiency note: without this, closing the tab leaves the
+  // bridge holding this session's dedicated backend process open until the
+  // idle-timeout sweep reclaims it (--session-ttl, 30 min default) — fine
+  // as a backstop, wasteful as the common case for someone opening many
+  // links over a session. `terminateSession()` sends the MCP-spec DELETE
+  // ("Clients that no longer need a particular session... SHOULD send an
+  // HTTP DELETE") the moment the tab actually closes, so the server's own
+  // `onsessionclosed` cleanup (ui-server.ts) fires immediately instead.
+  // Best-effort by nature (unload handlers can still lose the race, e.g. a
+  // hard crash) — the idle sweep stays the authoritative backstop, this
+  // just makes the common case fast instead of a 30-minute wait.
+  window.addEventListener("pagehide", () => {
+    void transport.terminateSession().catch(() => undefined);
   });
 
   await client.connect(transport);
