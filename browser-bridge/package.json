@@ -1,0 +1,27 @@
+{
+  "name": "mcp-apps-browser-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Generic companion for terminal MCP hosts (Claude Code CLI, etc.) that do not render MCP Apps ui:// resources. Wraps any stdio MCP server; when a tool result carries a ui:// resource, lazily opens a real browser tab that renders it via the official @modelcontextprotocol/ext-apps AppBridge, fully wired back to the same server.",
+  "bin": {
+    "mcp-apps-browser-bridge": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && vite build",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/ext-apps": "^2.0.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "open": "^10.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.0",
+    "vite-plugin-singlefile": "^2.3.0"
+  }
+}
