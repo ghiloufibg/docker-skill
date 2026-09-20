@@ -29,6 +29,7 @@ import {
   stopComposeProject,
 } from "./docker/tools/actions.js";
 import { ensureSidecarStarted, SIDECAR_PORT } from "./docker/stream/sidecar.js";
+import { createLargeContentStore } from "./src/lib/large-content.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -300,6 +301,12 @@ export function createServer(): McpServer {
     version: "0.1.0",
   });
 
+  // Generic MCP token-optimization helper (src/lib/large-content.ts) — not
+  // Docker-specific, safe to lift into any new MCP-UI skill. See that
+  // file's own doc comment for the full rationale; docker-logs below is
+  // this repo's one concrete instance of it, proving it out.
+  const largeContent = createLargeContentStore(server);
+
   const resourceUri = "ui://system-card/mcp-app.html";
   // The repo this server is running from — used for the git-status row.
   // Local-only by construction: no path outside the process's own cwd is ever read.
@@ -464,7 +471,18 @@ export function createServer(): McpServer {
       const lines = await getContainerLogs(id, tail);
       const payload = { lines };
       return {
-        content: [{ type: "text", text: JSON.stringify(payload) }],
+        // The concrete proof-of-concept for src/lib/large-content.ts: logs
+        // are the one payload in this server that's both potentially large
+        // AND genuinely needed by the model (for diagnosis, not just
+        // display) — unlike docker-ps/docker-inspect, this can't just be
+        // shrunk to a summary. A short tail stays inline as before; a long
+        // one becomes a summary + resource_link, so the model only pays
+        // full token cost on the calls where it actually reads the logs.
+        content: largeContent.toContent(JSON.stringify(payload), {
+          name: `docker-logs-${id}`,
+          description: `Log tail for container ${id}`,
+          mimeType: "application/json",
+        }),
         structuredContent: payload,
       };
     },
