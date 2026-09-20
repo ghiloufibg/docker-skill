@@ -52,7 +52,16 @@ function handleHostContextChanged(ctx: McpUiHostContext): void {
 }
 app.onhostcontextchanged = handleHostContextChanged;
 
-app.connect().then(() => {
-  const ctx = app.getHostContext();
-  if (ctx) handleHostContextChanged(ctx);
-});
+app
+  .connect()
+  .then(() => {
+    const ctx = app.getHostContext();
+    if (ctx) handleHostContextChanged(ctx);
+  })
+  // The SDK's own documented pattern (App_connect_withPostMessageTransport
+  // in app.examples.ts) wraps connect() in try/catch — onerror covers
+  // errors after a successful handshake, not a rejection of connect()
+  // itself, so without this a handshake failure becomes a silent,
+  // contextless unhandled promise rejection instead of the same
+  // console.error("[app]", err) path everything else in this file uses.
+  .catch((err: unknown) => app.onerror?.(err instanceof Error ? err : new Error(String(err))));

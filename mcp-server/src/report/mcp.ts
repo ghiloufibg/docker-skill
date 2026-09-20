@@ -44,7 +44,13 @@ function handleHostContextChanged(ctx: McpUiHostContext): void {
 }
 app.onhostcontextchanged = handleHostContextChanged;
 
-app.connect().then(() => {
-  const ctx = app.getHostContext();
-  if (ctx) handleHostContextChanged(ctx);
-});
+app
+  .connect()
+  .then(() => {
+    const ctx = app.getHostContext();
+    if (ctx) handleHostContextChanged(ctx);
+  })
+  // See docker-dashboard's mcp.ts for why this .catch is here: onerror
+  // covers errors after a successful handshake, not a rejection of
+  // connect() itself.
+  .catch((err: unknown) => app.onerror?.(err instanceof Error ? err : new Error(String(err))));

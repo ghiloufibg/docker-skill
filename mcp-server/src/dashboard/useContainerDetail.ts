@@ -170,7 +170,13 @@ export function useContainerDetail() {
       const source = new EventSource(streamUrl(info, "logs", containerId));
       logsSourceRef.current = source;
       source.onmessage = (ev) => {
-        const data = JSON.parse(ev.data) as { line?: string; error?: string };
+        let data: { line?: string; error?: string };
+        try {
+          data = JSON.parse(ev.data) as { line?: string; error?: string };
+        } catch {
+          setLogs((s) => ({ ...s, liveStatus: "Live update dropped (malformed data)." }));
+          return;
+        }
         if (data.error) {
           setLogs((s) => ({ ...s, liveStatus: data.error ?? null }));
           return;
@@ -204,7 +210,13 @@ export function useContainerDetail() {
       const source = new EventSource(streamUrl(info, "stats", containerId));
       statsSourceRef.current = source;
       source.onmessage = (ev) => {
-        const data = JSON.parse(ev.data) as ContainerStats | { error: string };
+        let data: ContainerStats | { error: string };
+        try {
+          data = JSON.parse(ev.data) as ContainerStats | { error: string };
+        } catch {
+          setStats((s) => ({ ...s, status: "Live update dropped (malformed data)." }));
+          return;
+        }
         if ("error" in data) {
           setStats((s) => ({ ...s, status: data.error }));
           return;
