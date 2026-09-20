@@ -137,6 +137,64 @@ async function main(): Promise<void> {
   }
   console.log("multi-session /mcp: two independent browser sessions both initialized ok");
 
+  // Regression test: a request to /mcp with no (or an unrecognized)
+  // Mcp-Session-Id header that ISN'T a valid `initialize` (a stale session
+  // id after a dropped connection, a buggy retry) takes handleMcpRequest's
+  // "spawn a fresh backend" branch, but never becomes a registered session
+  // — before the fix, the backend spawned for it (and its child process)
+  // was never closed, leaking for the life of the bridge process. This
+  // asserts the request itself still resolves cleanly (a clean error, not
+  // a hang) after the fix; the leak itself was confirmed and fixed by
+  // directly measuring backend child-process count before/after during
+  // development (OS-process inspection isn't portable enough for this
+  // automated, cross-platform suite).
+  {
+    const mcpUrl = new URL("/mcp", sessionUrl).toString();
+    const token = new URL(sessionUrl).searchParams.get("token")!;
+    const res = await fetch(mcpUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", params: {}, id: 1 }),
+    });
+    assert(res.status === 400, `non-initialize request with no session must 400, got ${res.status}`);
+    // The bridge must still be healthy afterward, not left in a bad state.
+    const followUp = new Client({ name: "smoke-post-leak-check", version: "0.1.0" });
+    await followUp.connect(
+      new StreamableHTTPClientTransport(new URL(mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }),
+    );
+    const { tools } = await followUp.listTools();
+    assert(tools.length === 16, `bridge must still work normally afterward, got ${tools.length} tools`);
+    await followUp.close();
+  }
+  console.log("non-initialize request with no session ok (rejected cleanly, bridge still healthy)");
+
+  // /message (the "Investigate"-button mechanism, see README "Known gaps")
+  // had zero coverage before this. Confirms the happy path (200, durable
+  // inbox write — see handleAppMessage) and the size cap added alongside
+  // the leak fix above.
+  {
+    const messageUrl = new URL("/message", sessionUrl);
+    messageUrl.search = new URL(sessionUrl).search;
+    const okRes = await fetch(messageUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: [{ type: "text", text: "smoke test message" }] }),
+    });
+    assert(okRes.status === 200, `/message with a valid body must 200, got ${okRes.status}`);
+
+    const oversizedRes = await fetch(messageUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "x".repeat(1_000_001),
+    });
+    assert(oversizedRes.status === 413, `/message over the size cap must 413, got ${oversizedRes.status}`);
+  }
+  console.log("/message ok (valid body accepted, oversized body rejected)");
+
   // Auth gates: wrong/missing token on both endpoints must be rejected, not
   // silently served.
   const noTokenUrl = sessionUrl.replace(/\?token=.*$/, "");

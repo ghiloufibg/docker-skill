@@ -1,5 +1,5 @@
 import http from "node:http";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +13,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Built by `vite build` (see vite.config.ts) — kept in a separate output dir
 // from the tsc-compiled Node code (dist/) so the two builds never collide.
 const WRAPPER_HTML_PATH = path.join(__dirname, "..", "dist-browser", "wrapper.html");
+
+// Same pattern as mcp-server/docker/stream/sidecar.ts's timingSafeTokenMatch
+// in this same repo: a plain `===` on the token leaks timing information
+// proportional to how many leading characters match, a real (if narrow,
+// loopback-only) weakening of the "every request needs a random per-process
+// token" property the README's threat model leans on.
+function timingSafeTokenMatch(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 interface AppSession {
   id: string;
@@ -174,7 +186,7 @@ export class UiBridge {
 
       const appMatch = url.pathname.match(/^\/app\/([^/]+)$/);
       if (appMatch) {
-        if (url.searchParams.get("token") !== this.token) return this.deny(res);
+        if (!timingSafeTokenMatch(url.searchParams.get("token") ?? "", this.token)) return this.deny(res);
         const session = this.appSessions.get(appMatch[1]);
         if (!session || session.expiresAt < Date.now()) {
           res.writeHead(404, { "content-type": "text/plain" }).end("Unknown or expired session");
@@ -265,9 +277,11 @@ export class UiBridge {
       // eslint-disable-next-line @typescript-eslint/require-await
       onUiToolResult: async () => undefined,
     });
+    let registered = false;
     const transport = new NodeStreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sessionId) => {
+        registered = true;
         this.mcpSessions.set(sessionId, { transport, backend, lastActivityAt: Date.now() });
       },
       onsessionclosed: (sessionId) => {
@@ -279,6 +293,19 @@ export class UiBridge {
     });
     await mcpServer.connect(transport);
     await transport.handleRequest(req, res);
+    // `backend` is spawned above for any request that arrives with no (or
+    // an unrecognized) Mcp-Session-Id header, before it's known whether the
+    // request actually is a valid `initialize` — a client that sends some
+    // other method first (a stale/dropped session id, a buggy retry) gets a
+    // clean error response from the SDK's own request handling, but
+    // `onsessioninitialized` then never fires, so this backend (and its
+    // spawned child process) would otherwise never be registered anywhere
+    // and never closed — leaked for the life of the bridge process.
+    // Verified empirically: one such request measurably left an extra
+    // backend child process running with no fix in place.
+    if (!registered) {
+      await Promise.allSettled([backend.close(), transport.close()]);
+    }
   }
 
   private sweepExpiredAppSessions(): void {
@@ -299,8 +326,8 @@ export class UiBridge {
 
   private hasValidToken(req: http.IncomingMessage, url: URL): boolean {
     const header = req.headers.authorization;
-    if (header === `Bearer ${this.token}`) return true;
-    return url.searchParams.get("token") === this.token;
+    if (header !== undefined && timingSafeTokenMatch(header, `Bearer ${this.token}`)) return true;
+    return timingSafeTokenMatch(url.searchParams.get("token") ?? "", this.token);
   }
 
   private deny(res: http.ServerResponse): void {
@@ -308,9 +335,35 @@ export class UiBridge {
   }
 
   private handleAppMessage(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const MAX_BODY_BYTES = 1_000_000; // ui/message is a short agent prompt, not a file upload
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let bytesReceived = 0;
+    let settled = false; // guards against double-responding once a size cap or stream error already handled it
+
+    req.on("data", (c: Buffer) => {
+      if (settled) return; // request already destroyed below; ignore trailing buffered chunks
+      bytesReceived += c.length;
+      if (bytesReceived > MAX_BODY_BYTES) {
+        settled = true;
+        res.writeHead(413, { "content-type": "text/plain" }).end("Payload too large");
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+
+    // Without this, a client that aborts mid-upload never fires "end" —
+    // the request just hangs with no timeout and no cleanup, instead of
+    // failing cleanly.
+    req.on("error", () => {
+      if (settled) return;
+      settled = true;
+      if (!res.headersSent) res.writeHead(400).end();
+    });
+
     req.on("end", () => {
+      if (settled) return;
+      settled = true;
       void (async () => {
         try {
           // Parsed into `unknown`, not trusted as any particular shape --
