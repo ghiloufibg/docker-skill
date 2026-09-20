@@ -7,54 +7,7 @@
   <title>Local System Card</title>
 </head>
 <body>
-  <main class="main">
-    <header class="header">
-      <h1 class="title">Local System Card</h1>
-      <button id="refresh-btn" class="btn">Refresh</button>
-    </header>
-
-    <section class="info-section">
-      <dl class="info-list">
-        <div class="info-item"><dt>Hostname</dt><dd id="info-hostname">--</dd></div>
-        <div class="info-item"><dt>Platform</dt><dd id="info-platform">--</dd></div>
-        <div class="info-item"><dt>CPU</dt><dd id="info-cpu">--</dd></div>
-        <div class="info-item"><dt>Uptime</dt><dd id="info-uptime">--</dd></div>
-      </dl>
-    </section>
-
-    <section class="bar-section">
-      <div class="bar-label">
-        <span>Disk (/)</span>
-        <span id="disk-percent">--%</span>
-      </div>
-      <div class="bar">
-        <div id="disk-bar-fill" class="bar-fill"></div>
-      </div>
-      <div id="disk-detail" class="bar-detail">-- free</div>
-    </section>
-
-    <section class="bar-section">
-      <div class="bar-label">
-        <span>Memory</span>
-        <span id="mem-percent">--%</span>
-      </div>
-      <div class="bar">
-        <div id="mem-bar-fill" class="bar-fill"></div>
-      </div>
-      <div id="mem-detail" class="bar-detail">-- free</div>
-    </section>
-
-    <section class="git-section">
-      <h2 class="section-title">Git</h2>
-      <div id="git-summary" class="git-summary">--</div>
-    </section>
-
-    <section class="investigate-section" id="investigate-section" hidden>
-      <p id="investigate-text" class="investigate-text"></p>
-      <button id="investigate-btn" class="btn btn-warning">Investigate</button>
-    </section>
-  </main>
-
-  <script type="module" src="./src/mcp-app.ts"></script>
+  <div id="root"></div>
+  <script type="module" src="./src/mcp-app.tsx"></script>
 </body>
 </html>

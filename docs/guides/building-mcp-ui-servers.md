@@ -157,13 +157,17 @@ Two different questions, two different answers:
   framing): use the kit, don't touch it. This is where the security
   properties live.
 - **View layer** (what's actually drawn): plain DOM/CSS is usually
-  right. Every byte of the view layer ships inlined in every tool
-  result (see §12 on payload size — the protocol layer already costs
-  ~230KB before your view code adds anything), and most MCP-UI screens
-  (cards, tabs, forms, confirm dialogs) don't need component-tree
-  management. Reach for something heavier (Preact+htm, a real
-  framework) only once plain DOM code has visibly become the harder
-  path to read — not by default.
+  right at first. Every byte of the view layer ships inlined in every
+  tool result (see §12 on payload size — the protocol layer already
+  costs ~230KB before your view code adds anything), and most MCP-UI
+  screens (cards, tabs, forms, confirm dialogs) don't need component-
+  tree management at small scale. Reach for something heavier
+  (Preact+htm, a real framework) only once plain DOM code has visibly
+  become the harder path to read or extend — not by default, and not
+  just because a framework is your normal habit. If that line *is*
+  crossed, don't rule out React specifically for being "too heavy" on
+  principle — measure it (§12 has the numbers from doing exactly that)
+  and decide with the real cost in hand, not a guess.
 
 Don't use a charting library for a one-shot/non-streaming stat — a hand
 rolled inline `<svg>` bar or sparkline is smaller and sufficient. Save
@@ -171,6 +175,17 @@ the heavier tooling for genuinely complex visuals (the official SDK's
 own examples use Chart.js for a *streaming* CPU history chart, which is
 a fair trade there — the shape of the problem, not a rule against
 charting libraries in general).
+
+**When you do reach for a full component framework, Radix-style
+accessible primitives (Dialog/Tabs/Checkbox, via shadcn/ui or directly)
+are worth their weight for anything resembling a confirm dialog.** §16
+below is a whole section about how much manual effort a correct focus
+trap/initial-focus/Escape-to-cancel took to get right by hand, and how
+easy the first "fix" was to get subtly wrong. A maintained primitive
+that implements that correctly out of the box turns a class of bug this
+guide spent real space on into a solved problem — worth the added
+payload specifically for dialogs, even in a codebase that's otherwise
+staying with plain DOM/CSS everywhere else.
 
 ## 4. Build in stages, re-verify rendering after every UI change
 
@@ -527,6 +542,28 @@ Practical implications:
   actual hosted URL) so the browser's normal HTTP cache can take over
   on repeat loads — a real architectural trade-off, not a default.
 
+**That ~15-20 KB application-code figure is a vanilla-DOM number,
+not a universal one — measure again if you add a framework.** The same
+project later rewrote all three of its widgets in React + Tailwind CSS
+v4 + shadcn/ui (Radix primitives) on explicit request. Measured
+directly, per resource, vanilla vs. React+Tailwind+shadcn:
+
+| Resource | Vanilla DOM | React + Tailwind + shadcn | Multiplier |
+|---|---|---|---|
+| Smallest widget (system card) | 244 KB / 65 KB gzip | 526 KB / 151 KB gzip | 2.2× / 2.3× |
+| Largest widget (fleet dashboard) | 273 KB / 72 KB gzip | 644 KB / 187 KB gzip | 2.4× / 2.6× |
+
+Roughly 2.2-2.6× the vanilla baseline — React+ReactDOM+Tailwind's
+generated CSS dominate the delta the same way the SDK dominates the
+~236 KB floor above: a trivial widget with one button and one badge and
+*zero* application logic already weighs about as much as the entire
+vanilla dashboard did with all its business logic included. This isn't
+a reason to avoid a framework — it's the number to have in hand before
+deciding, per §3's updated guidance. Nothing about the CSP stance
+changes: a `@tailwindcss/vite`-compiled, tree-shaken, fully-inlined
+build stays entirely within the "no remote origin" rule (§11) — this is
+purely an inline-payload cost, not a new constraint.
+
 ## 13. Test in two layers — neither is sufficient alone
 
 **Headless protocol test** (spin up the built server, drive it with
@@ -863,9 +900,67 @@ piece of UI is designed to be transient, "I saw it" and "I have evidence
 it rendered" are not the same claim, and only the second one survives
 someone asking "are you sure?"
 
+## 21. Porting a widget to a component framework: keep the SDK registration at module scope
+
+If you move a widget from vanilla DOM/JS to React (or any framework with
+a component lifecycle), §2's rule — register `ontoolresult`/
+`onhostcontextchanged`/etc. before `connect()`, because the host can
+message you right after the handshake — gets easy to violate by
+accident, in a way that's specific to frameworks and didn't exist in
+the vanilla version at all.
+
+**A `useEffect` (or equivalent lifecycle hook) runs *after* the first
+render commits, which is already too late.** The natural first draft
+of a port puts the SDK setup — creating the `App`, wiring
+`ontoolresult` — inside the root component's mount effect, because
+that's where "do a thing when this component starts up" normally goes
+in component-framework code. But the vanilla version's equivalent code
+ran at module/script-evaluation time, before the DOM had even finished
+its first paint — a strictly earlier point than any lifecycle hook can
+reach. Moving SDK setup into a `useEffect` narrows, but does not close,
+the race the vanilla version accidentally avoided for free: a host that
+messages immediately after the handshake can still beat the first
+effect run. This is exactly the kind of bug that won't show up against
+a fast local reference host (round 4's own optimistic-UI lesson, §20)
+and won't show up in a headless protocol test either (§13) — it needs a
+slow-enough or eager-enough real host to actually manifest, so don't
+wait to find it empirically. Catch it by re-reading the port's diff
+against §2's rule directly, the same way you'd check a new
+`hidden`-toggled element against §9's rule: create the SDK client and
+register every handler it needs at **module scope** — plain top-level
+code in whatever file first imports the SDK — exactly as the vanilla
+version did, and treat "this runs before React exists" as a hard
+requirement, not a nice-to-have.
+
+**Bridge the SDK's push-style callbacks into component state with
+`useSyncExternalStore`, not a `useEffect` subscription.** Once
+`ontoolresult` etc. live at module scope, a component still needs to
+re-render when new data arrives. The correct primitive for "a
+component tree needs to react to a mutable value that changes outside
+React's own render cycle" is `useSyncExternalStore(subscribe,
+getSnapshot)` — not a `useState` initialized from a `useEffect`
+subscription, which reintroduces its own version of the same
+too-late-to-catch-the-first-message problem for the exact same reason.
+The subscribe/notify plumbing is a dozen lines (a `Set` of listener
+callbacks, notified from the module-scope callback, unsubscribed on
+unmount) and is worth writing once per widget rather than reaching for
+a state-management library for this alone — matches this guide's own
+running theme of not reaching for heavier tooling than a problem
+actually needs.
+
 ## Appendix: where each lesson came from
 
-Every lesson above has a fuller worked example in this repo:
+Every lesson above has a fuller worked example in this repo. **Note on
+paths below for rounds 1-4:** they point at the vanilla-DOM file layout
+(`src/docker-dashboard.ts`/`.css`, `src/mcp-app.ts`/`.css`,
+`src/investigation-report.ts`/`.css`) that round 5 replaced with a
+React/Tailwind component tree under `src/dashboard/`, `src/system-card/`,
+`src/report/` — those exact files no longer exist on this branch's HEAD.
+Use the branch's git history to see them (`git log --all --
+mcp-server/src/docker-dashboard.ts`), or read the equivalent logic in its
+new location per round 5's own appendix entry below; the underlying
+lesson (what the bug was, why the fix works) is unchanged by the
+rewrite, only the file it lived in moved.
 
 - Kit choice, protocol/view split — `docs/design/mcp-ui-docker-ops.md` §6.
 - Risk tiers, annotations, confirm-dialog implementation —
@@ -915,3 +1010,16 @@ Every lesson above has a fuller worked example in this repo:
   round-4 bullet at the end of §12, including the stale-bulk-toolbar bug
   a Playwright assertion caught and the `prefers-reduced-motion` toast
   fix a self-review caught first.
+- Round 5 (the React + Tailwind + shadcn/ui rewrite) — `docs/design/
+  mcp-ui-docker-ops.md` §6.1's update and §11 item 9. The module-scope-
+  registration fix from this guide's own §21 —
+  `mcp-server/src/system-card/mcp.ts`'s `useSystemInfoResult` (and its
+  siblings `useIncomingContainers` in `src/dashboard/mcp.ts`,
+  `useIncomingReport` in `src/report/mcp.ts`), all built on
+  `useSyncExternalStore`. The Radix-backed confirm dialog —
+  `useConfirm` in `src/dashboard/ConfirmDialog.tsx`, its
+  `onOpenAutoFocus` override for the Cancel-not-destructive initial-
+  focus rule in `src/components/ui/alert-dialog.tsx`, shared as source
+  by both `src/dashboard/DashboardApp.tsx` and `src/report/ReportApp.tsx`.
+  The Tailwind theme-variable wiring that keeps §8's dual light/dark
+  selectors working — `@theme inline` in `src/styles/theme.css`.

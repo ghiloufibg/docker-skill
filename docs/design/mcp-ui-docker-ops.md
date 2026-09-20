@@ -264,6 +264,46 @@ not by default.
   could target directly, and even then it'd be additive, not a
   replacement for the tool/prompt postMessage protocol.
 
+**Update (round 5) — the "explicitly ruled out" call on React was
+reversed, deliberately and with the cost paid in full, not because the
+original reasoning above was wrong.** All three UI resources were
+rewritten in React + Tailwind CSS v4 + shadcn/ui (Radix primitives),
+on explicit request, for the component-composition and accessible-
+primitive ergonomics §6.1's "escape hatch" paragraph already
+anticipated — Preact+htm was the originally-planned fallback for
+exactly this; React was chosen instead this time because it's what was
+asked for, and by round 5 the codebase had enough interactive surface
+(tabs, tiered confirm dialogs, a bulk-action toolbar) that the
+component-composition case for *something* beyond hand-rolled DOM had
+become real, matching this section's own "reach for it only once plain
+DOM has visibly become the harder path to read" bar. The predicted
+payload tax materialized exactly as this section said it would — measured,
+not estimated:
+
+| Resource | Vanilla (round 4) | React+Tailwind+shadcn (round 5) | Multiplier |
+|---|---|---|---|
+| `mcp-app.html` | 244.1 KB / 64.9 KB gzip | 526.1 KB / 151.1 KB gzip | 2.16× / 2.33× |
+| `docker-dashboard.html` | 273.5 KB / 72.3 KB gzip | 643.8 KB / 186.6 KB gzip | 2.35× / 2.58× |
+| `investigation-report.html` | 247.8 KB / 65.8 KB gzip | 597.7 KB / 172.2 KB gzip | 2.41× / 2.62× |
+
+Roughly 2.2-2.6× the vanilla baseline, on top of the ~236 KB SDK floor
+§6.0 already measured — React+ReactDOM+Tailwind's generated CSS make up
+most of that delta (a trivial widget with one Button and one Badge and
+zero business logic already weighs ~273 KB before any application code
+is added, matching the *entire* vanilla dashboard's prior total). Tailwind
+CDN was never on the table (ruled out above, still correctly — a
+`@tailwindcss/vite`-compiled, tree-shaken, fully-inlined build was used
+instead, so the CSP stance in §9 is unaffected: nothing loads from a
+remote origin, the cost is purely inline-payload size, not a new
+constraint). Radix's primitives (`AlertDialog`, `Tabs`, `Checkbox`) turned
+out to have a real correctness benefit, not just a stylistic one: they
+implement the exact focus-trap/initial-focus/Escape-to-cancel behavior
+round 2 spent real effort hand-rolling and then re-verifying (§16 of the
+guide) — using a maintained primitive for that removes a whole class of
+future regression, not just lines of code. Full account of what changed,
+what was re-verified, and what stayed the same is in §11 item 8's update
+below and the guide's own updated §3.
+
 ## 7. Communication protocol in detail
 
 ### 7.1 Data round trip (`tool` messages)
@@ -646,6 +686,64 @@ before the next is started:
      during `docker-ps` refresh; a search icon; and a `transition` on
      card hover/selection state. See §12's round-4 bullet for what a
      rendering-based check did and didn't catch here.
+9. *(not in the original numbered plan — round 5, a rendering-technique
+   migration, not a new feature)* **All three UI resources rewritten in
+   React + Tailwind CSS v4 + shadcn/ui (Radix primitives), on explicit
+   request.** **Status: done, verified with zero regressions.** §6.1's
+   "explicitly ruled out React" call is reversed above, with the payload
+   cost measured and accepted, not glossed over. What actually changed:
+   - Every widget's protocol layer (the `App` instance, `ontoolresult`,
+     `onhostcontextchanged`, `callServerTool`/`sendMessage` call sites)
+     was left untouched in substance — only *where* it lives moved, from
+     top-level script code to a small `mcp.ts` per widget, registered at
+     **module scope, not inside a React effect**. This mattered in
+     practice, not just in principle: the first draft of the system
+     card's port registered `ontoolresult` inside a `useEffect`, which
+     only runs after React's first paint — reintroducing the exact race
+     §2 warns about (a host's first message arriving before the handler
+     that reads it exists). Caught by re-reading the diff against §2's
+     own rule before ever rendering it, not by a failing test — fixed by
+     moving registration back to module scope, bridged into React state
+     via `useSyncExternalStore` (the correct primitive for subscribing a
+     component tree to a mutable value that changes outside React's own
+     render cycle, here "the last tool result the SDK delivered").
+   - The confirm-dialog implementation (design doc §7/§9, guide §16) was
+     rebuilt on Radix `AlertDialog` instead of hand-rolled
+     `dialogFocusables()`/keydown-trap code, and the two widgets that
+     need it (the dashboard's own actions and the report's remediation
+     buttons) now share one `useConfirm()` hook/component from source
+     — still independently bundled per widget at build time, so this
+     doesn't reopen the "no shared runtime between resources" question,
+     it's the same kind of source-level reuse as importing any other
+     local module. The one thing that still needed a deliberate override,
+     not something Radix gives for free: initial focus goes to Cancel,
+     not the dialog itself (Radix's own default) — wired via
+     `AlertDialogContent`'s `onOpenAutoFocus`, matching §16's security-
+     relevant requirement that an accidental Enter right after a Tier-2
+     dialog opens must land on the safe control.
+   - Payload delta measured directly per resource (table above) —
+     roughly 2.2-2.6× the vanilla baseline. `npm run smoke` still passes
+     unmodified (the server side, `docker/`, and `server.ts` were not
+     touched by this migration at all — only the three `src/*.tsx`
+     view-layer entrypoints and their component trees changed).
+   - Full Playwright re-verification against `basic-host` + a real Docker
+     daemon covered every feature from rounds 1-4 by name: search/
+     filter/sort, health badge + resource limits, bulk selection and its
+     Tier-2 count-based confirm, compose-project grouping and teardown,
+     live Logs/Stats streaming with the sparkline, the optimistic
+     detail-panel skeleton, toast notifications on both the dashboard
+     and the report widget, the theme toggle (both the media-query and
+     `[data-theme]` selectors — re-verified in the new Tailwind `@theme
+     inline` wiring specifically, since getting that wrong would have
+     silently broken host-driven theming the same way §8 originally
+     documented), and a 375px viewport with no horizontal overflow. Zero
+     regressions found. One near-miss caught by a script bug, not a real
+     one: an early check for the refresh-icon spin class raced the
+     click itself and reported `false` — a `MutationObserver`-based
+     recheck (the same technique round 4 needed for its own optimistic-
+     loading skeleton, guide §20) confirmed the spin class does toggle
+     correctly, just faster than a fixed `waitForTimeout` reliably
+     catches.
 
 ## 12. Open questions / risks
 

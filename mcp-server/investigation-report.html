@@ -7,61 +7,7 @@
   <title>Investigation Report</title>
 </head>
 <body>
-  <main class="main">
-    <header class="header">
-      <h1 id="report-subject" class="title">Investigation Report</h1>
-    </header>
-
-    <section class="summary-section">
-      <p id="report-summary" class="summary-text">--</p>
-    </section>
-
-    <section class="root-cause-section">
-      <h2 class="section-title">Root cause</h2>
-      <div id="root-cause" class="root-cause-box">--</div>
-    </section>
-
-    <section class="timeline-section">
-      <h2 class="section-title">Timeline</h2>
-      <ol id="timeline-list" class="timeline-list"></ol>
-    </section>
-
-    <section class="evidence-section">
-      <h2 class="section-title">Evidence</h2>
-      <div id="evidence-list" class="evidence-list"></div>
-    </section>
-
-    <section class="remediation-section">
-      <h2 class="section-title">Suggested remediation</h2>
-      <ul id="remediation-list" class="remediation-list"></ul>
-      <p class="remediation-note">
-        Items with a "Run" button call this server's own gated tools —
-        each still requires confirming in the dialog below before anything
-        runs. Plain suggestions have no button and take no action.
-      </p>
-      <div id="remediation-status" class="remediation-status" hidden></div>
-    </section>
-  </main>
-
-  <div id="confirm-overlay" class="confirm-overlay" hidden>
-    <div class="confirm-dialog">
-      <h3 id="confirm-title" class="confirm-title">--</h3>
-      <p id="confirm-body" class="confirm-body">--</p>
-      <div id="confirm-type-wrap" class="confirm-type-wrap" hidden>
-        <label for="confirm-type-input" id="confirm-type-label" class="confirm-type-label">
-          Type the container name to confirm:
-        </label>
-        <input id="confirm-type-input" class="confirm-type-input" type="text" autocomplete="off">
-      </div>
-      <div class="confirm-actions">
-        <button id="confirm-cancel-btn" class="btn btn-small">Cancel</button>
-        <button id="confirm-ok-btn" class="btn btn-small btn-danger" disabled>Confirm</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="toast-container" class="toast-container" aria-live="polite"></div>
-
-  <script type="module" src="./src/investigation-report.ts"></script>
+  <div id="root"></div>
+  <script type="module" src="./src/investigation-report.tsx"></script>
 </body>
 </html>

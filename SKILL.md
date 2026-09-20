@@ -1,9 +1,9 @@
 ---
 name: docker-skill-system-card
-description: MCP-UI/Docker Ops experiment in this repo, Stages 0-5 plus advanced features and a fourth round of functional/UI-UX additions (the full staged plan). Shows a read-only local system card and a Docker fleet dashboard (list/inspect/logs/stats with optional live streaming, health status and resource limits, search/filter/sort, compose-project grouping with project-level teardown, multi-select bulk actions, toast notifications, plus tier-gated start/restart/pause/unpause/stop/kill/remove) as interactive MCP Apps, each with an "Investigate" button that hands root-cause analysis to the agent and has the agent report back via a structured investigation-report resource whose remediation suggestions can be gated one-click actions. Use when asked to test whether the current host renders MCP Apps UI resources, to check or manage local Docker containers through this repo's MCP server, or to continue the docker-skill design-to-implementation work described in docs/design/mcp-ui-docker-ops.md.
+description: MCP-UI/Docker Ops experiment in this repo, Stages 0-5 plus advanced features, a fourth round of functional/UI-UX additions, and a fifth round rewriting the UI in React + Tailwind + shadcn/ui (the full staged plan). Shows a read-only local system card and a Docker fleet dashboard (list/inspect/logs/stats with optional live streaming, health status and resource limits, search/filter/sort, compose-project grouping with project-level teardown, multi-select bulk actions, toast notifications, plus tier-gated start/restart/pause/unpause/stop/kill/remove) as interactive MCP Apps, each with an "Investigate" button that hands root-cause analysis to the agent and has the agent report back via a structured investigation-report resource whose remediation suggestions can be gated one-click actions. Use when asked to test whether the current host renders MCP Apps UI resources, to check or manage local Docker containers through this repo's MCP server, or to continue the docker-skill design-to-implementation work described in docs/design/mcp-ui-docker-ops.md.
 ---
 
-# docker-skill: MCP-UI spike, Stages 0-5 + advanced features + round 4 (complete)
+# docker-skill: MCP-UI spike, Stages 0-5 + advanced features + rounds 4-5 (complete)
 
 `docs/design/mcp-ui-docker-ops.md` §11 laid out five stages, all five —
 plumbing spike, read-only dashboard, logs/stats, investigation report,
@@ -81,6 +81,26 @@ loading skeletons for the card list and the detail panel (the latter
 now populated optimistically with the clicked container's already-known
 name instead of showing the previous container's stale data), a
 spinning refresh icon, and a `"/"`-to-focus-search shortcut.
+
+**Round 5 (design doc §11 item 9): all three UI resources rewritten in
+React + Tailwind CSS v4 + shadcn/ui (Radix primitives), on request.**
+Every feature above still works exactly as described — this was a
+view-layer rewrite, not a feature or protocol change, verified with a
+full Playwright pass against a real Docker daemon after the rewrite
+with zero regressions found. The MCP Apps SDK registration
+(`App`/`ontoolresult`/`onhostcontextchanged`) now lives in a small
+`mcp.ts` per widget (`src/{dashboard,system-card,report}/mcp.ts`),
+still at **module scope**, not inside a React effect — see the design
+doc §11 item 9 and the guide's new §21 for why that distinction matters
+in a framework port specifically. The tier-gated confirm dialog is now
+built on Radix `AlertDialog` (`src/dashboard/ConfirmDialog.tsx`),
+shared as source between the dashboard and the report widget, which
+gets the focus-trap/Escape-to-cancel behavior §12/§16 of the guide
+describe hand-rolling for free from a maintained primitive — the one
+deliberate override is initial focus landing on Cancel, not Radix's own
+default, per that same security-relevant rule. Cost: each resource is
+now roughly 2.2-2.6× its previous size (measured in design doc §6.1's
+update table) — accepted deliberately, not accidental bloat.
 
 **Stage 3 — investigation report** (`build-investigation-report`,
 model-facing): both "Investigate" prompts end by telling the agent to

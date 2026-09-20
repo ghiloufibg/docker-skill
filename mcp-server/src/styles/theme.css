@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+/*
+ * The dual light/dark mechanism below is unchanged from the vanilla-CSS
+ * version — see docs/guides/building-mcp-ui-servers.md §8: a host's own
+ * theme toggle sets [data-theme] on documentElement (applyDocumentTheme),
+ * independent of the OS-level prefers-color-scheme, so BOTH selectors are
+ * required or a host-driven theme switch silently does nothing.
+ */
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #3b82f6;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --card: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b0f19;
+    --fg: #f3f4f6;
+    --muted: #9ca3af;
+    --border: #2a3242;
+    --accent: #60a5fa;
+    --warning: #fbbf24;
+    --danger: #f87171;
+    --success: #4ade80;
+    --card: #131a2a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b0f19;
+  --fg: #f3f4f6;
+  --muted: #9ca3af;
+  --border: #2a3242;
+  --accent: #60a5fa;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --success: #4ade80;
+  --card: #131a2a;
+}
+
+/*
+ * @theme inline (not plain @theme): these tokens must reference the *live*
+ * --bg/--fg/... custom properties above, not a value baked in at build
+ * time, because those properties themselves change via the media query
+ * and [data-theme] selectors. `inline` is Tailwind v4's documented escape
+ * hatch for exactly this — wiring an already-dynamic CSS variable into a
+ * theme token instead of a static color. Getting this wrong (plain
+ * @theme with a literal value) would silently break host-driven theme
+ * switching, the same class of bug §8 documents from the vanilla-CSS era.
+ */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-card: var(--card);
+
+  --animate-fade-in: fade-in 0.15s ease-out;
+  --animate-dialog-in: dialog-in 0.15s ease-out;
+  --animate-toast-in: toast-in 0.2s ease-out;
+  --animate-toast-out: toast-out 0.2s ease-in forwards;
+  --animate-spin-slow: spin 0.7s linear infinite;
+  --animate-shimmer: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; }
+  to { opacity: 0; transform: translateY(4px); }
+}
+@keyframes skeleton-shimmer {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/*
+ * Same reduced-motion discipline as the vanilla version: disable the
+ * animation utilities above, not just "some" of them.
+ */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+}

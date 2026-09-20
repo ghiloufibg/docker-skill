@@ -20,10 +20,11 @@ driving a real container restart against a real daemon).
 ## Status
 
 **All five stages from design doc §11, everything the design doc
-originally deferred as "not a numbered stage," and a fourth round of
-functional/UI-UX additions on top are implemented and passing their
-headless smoke test.** A local system card; a real Docker fleet
-dashboard (`docker-ps`/`docker-inspect`/`docker-logs`/`docker-stats`,
+originally deferred as "not a numbered stage," a fourth round of
+functional/UI-UX additions, and a fifth round rewriting all three UI
+resources in React + Tailwind CSS v4 + shadcn/ui are implemented and
+passing their headless smoke test.** A local system card; a real Docker
+fleet dashboard (`docker-ps`/`docker-inspect`/`docker-logs`/`docker-stats`,
 tabbed detail panel with health status and CPU/memory resource limits,
 cards grouped by compose project with a project-level teardown button,
 client-side search/filter/sort, multi-select bulk actions, toast
@@ -37,6 +38,16 @@ actions (`docker-start`/`restart`/`pause`/`unpause` at Tier 1,
 Tier 2 requires typing the container name, or the selection count for a
 bulk action). See [`SKILL.md`](SKILL.md) for what's implemented, a
 documented residual gap in the Tier 2 confirm design, and how to run it.
+
+**Round 5 note:** the view layer moved from hand-rolled vanilla DOM/CSS
+to React + Tailwind CSS v4 + shadcn/ui (Radix primitives) — a
+deliberate reversal of the design doc's original "no framework" call,
+made on request and with the payload cost measured and accepted (each
+resource is now roughly 2.2-2.6× its vanilla size; see design doc §6.1's
+update and §12's table). The protocol layer, every tool, and the whole
+Docker-side server were untouched by this — it's a rendering-technique
+change, verified against the exact same feature set as every prior
+round with zero regressions found.
 
 ```bash
 cd mcp-server

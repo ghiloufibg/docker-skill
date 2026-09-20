@@ -1,3 +1,5 @@
+import { fileURLToPath, URL } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
@@ -12,7 +14,12 @@ const isDevelopment = process.env.NODE_ENV === "development";
 // no external script/style URLs, per the CSP stance in
 // docs/design/mcp-ui-docker-ops.md §9.
 export default defineConfig({
-  plugins: [viteSingleFile()],
+  plugins: [tailwindcss(), viteSingleFile()],
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   build: {
     sourcemap: isDevelopment ? "inline" : undefined,
     cssMinify: !isDevelopment,
