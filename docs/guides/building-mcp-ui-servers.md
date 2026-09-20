@@ -7,16 +7,18 @@ This document strips the Docker-specific parts out and keeps only what
 should transfer to *any* MCP-UI server. Where something is a docker-skill
 choice rather than a universal rule, it's marked as such.
 
-Twelve real bugs got found across this project, across four separate
+Fourteen real bugs got found across this project, across six separate
 rounds of build-and-break-it experimentation, and every one of them was
-found by *actually rendering the page against a real host* (or, for the
-streaming ones, actually driving a real container restart against a
-real daemon) — never by the headless protocol tests, which were passing
-the whole time. That's the single biggest lesson here, and it shapes
-most of what follows. (A couple more, in round four, were caught by
-self-review before a render was ever needed — still worth naming, but
-not part of that twelve; see §20 and the design doc's round-4 write-up
-for the full count.)
+found by *actually running the thing* — rendering the page against a
+real host, driving a real container restart against a real daemon for
+the streaming ones, or running an automated tool (`axe-core`) against
+the rendered DOM for the two contrast/theming bugs in round six — never
+by the headless protocol tests, which were passing the whole time, and
+never by eye. That's the single biggest lesson here, and it shapes most
+of what follows. (A few more, across rounds four and five, were caught
+by self-review before a render was ever needed — still worth naming,
+but not part of that fourteen; see §20-22 and the design doc's round-4/
+round-6 write-ups for the full count.)
 
 A meta-lesson showed up more than once, in more than one shape: **a fix
 needs the same real-conditions verification as the bug it fixes.** In
@@ -48,7 +50,13 @@ once if the bug is about a gap between events" are not the same claim.
       `display` rule in your own CSS is safe, the browser's own SVG
       stylesheet can be the thing overriding you (§9).
 - [ ] Give every theme-aware color token both a media-query rule *and* a
-      `[data-theme]` rule (§8).
+      `[data-theme]` rule (§8) — and wire any third-party component's own
+      theme prop to that same effective-theme logic explicitly, it won't
+      inherit it for free.
+- [ ] Run an automated contrast audit (`axe-core`) against every UI
+      state that puts new text on screen, including transient ones like
+      a toast — don't trust a color looking "clearly red enough" by eye
+      (§22).
 - [ ] Check `result.isError` explicitly at every `callServerTool` site —
       never rely on an incidental throw (§10).
 - [ ] Test real failure paths (bad id, race conditions), not just happy
@@ -390,6 +398,22 @@ actual theme toggle (don't just trust that you handled the callback —
 check the computed background color of your widget's `<body>`
 afterward).
 
+**A component library brought in later doesn't inherit this wiring for
+free — it needs the same dual-selector logic wired to it explicitly.**
+A toast library (or any other component with its own `theme="light" |
+"dark" | "system"` prop) reads `prefers-color-scheme` at best, which is
+exactly half of the rule above — it has no way to know about a host's
+`[data-theme]` override unless you tell it. The bug this produces is
+easy to miss because it's not a rendering failure: the rest of the page
+correctly goes dark, and the third-party component just quietly stays
+on its own default theme, looking like a deliberate design choice
+rather than a bug, until someone actually toggles the host's theme and
+sees it. Read the *current effective theme* the same way your CSS
+already computes it — the host's explicit override if set, else the OS
+preference — and pass that into the component explicitly; keep it live
+with a `MutationObserver` on the attribute plus a `matchMedia` change
+listener, not just a one-time read at mount.
+
 ## 9. The `[hidden]` CSS trap
 
 An author stylesheet rule beats the browser's default
@@ -663,6 +687,11 @@ headlessly with Playwright. Concrete recipe and gotchas:
 - [ ] Payload size is understood (§12), not guessed at.
 - [ ] Every confirm/modal dialog has real keyboard support, verified by
       rendering it — not just implemented (§16).
+- [ ] Every color token used as text color was contrast-checked against
+      every background it can appear on (including tinted/translucent
+      ones), with an automated tool (`axe-core`), across every state
+      that puts new text on screen — including a toast/notification, not
+      just the resting view (§22).
 - [ ] Every mutating action is guarded against firing concurrently with
       another one on the same target (§17).
 - [ ] The full interaction surface was checked at a phone-width
@@ -948,6 +977,68 @@ a state-management library for this alone — matches this guide's own
 running theme of not reaching for heavier tooling than a problem
 actually needs.
 
+## 22. Run an automated contrast audit — manual keyboard testing doesn't cover it
+
+§16's keyboard-accessibility checklist (initial focus, a Tab trap,
+Escape-to-cancel) and this section are testing two different axes of
+accessibility, and passing one says nothing about the other. A
+confirm dialog can have a flawless focus trap and still fail for a
+low-vision user if its text is 3:1 against its background instead of
+the 4.5:1 WCAG AA requires for normal-size text (3:1 only applies to
+large text — 18pt, or 14pt bold — and to non-text UI components like
+borders and icons). Nobody reliably self-catches this by eye: four
+prior rounds of this project's own screenshots and manual review never
+flagged it, because a slightly-too-light red or amber still *reads* as
+"clearly red" or "clearly amber" to a sighted reviewer looking for
+roughly the right color, not measuring the actual ratio.
+
+**Run `axe-core` against the widget's own document, not the host
+page.** Inject it into the actual iframe your UI renders in — for a
+doubly-sandboxed host like the MCP Apps reference implementation, that
+means resolving the real nested `Frame` object, not a `FrameLocator`
+(which can't take a script injection):
+
+```js
+const outerFrame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+const innerFrame = await (await outerFrame.locator('iframe').first().elementHandle()).contentFrame();
+await innerFrame.addScriptTag({ content: axeSource }); // read axe.min.js off disk first
+const results = await innerFrame.evaluate(() => window.axe.run(document, { resultTypes: ['violations'] }));
+```
+
+**Check every state that puts new text on screen, not just the
+default view — a toast notification is easy to forget.** The default
+card-list/detail-panel views passed cleanly on the first pass in this
+project; the violations were only in text that only exists transiently
+(a confirm dialog's own copy, a toast's success/error message). If your
+audit script never triggers the action that produces a toast, it never
+checks the toast's contrast — an audit that only covers a widget's
+resting state has a real coverage gap, the same shape of gap as testing
+only the happy path (§10).
+
+**A finding at 4.3-4.4:1 that vanishes and reappears between runs is
+probably an animation timing artifact in your test, not a flaky bug in
+the app.** `axe-core`'s contrast check samples actual rendered pixels;
+caught mid-fade-in (a toast library's entrance transition, say), that
+sampling can return a genuinely different, lighter blended color than
+the element's settled CSS value — read a computed-style property
+directly (`getComputedStyle(el).color`) to check whether the *value* is
+right, independent of whether the audit happened to run mid-animation;
+if the computed value is already correct, wait longer before the next
+audit pass rather than chasing a bug that isn't there.
+
+**Fix real findings at the token level, computed, not eyeballed.** If a
+CSS custom property is used as text color anywhere, contrast-check it
+against every background it can actually appear on (plain page
+background and any tinted/translucent surface you build with it, like
+a `color-mix()` or low-opacity fill) — a token that passes on white can
+still fail against its own 10-40%-opacity self. Compute replacement
+colors with the actual WCAG relative-luminance formula rather than
+picking a slightly-darker shade and hoping; a browser console one-liner
+or a five-line script is enough, and it's the same rigor §16 already
+asks for when re-verifying a keyboard fix — a color choice you're
+confident about and a color choice you've measured are not the same
+claim.
+
 ## Appendix: where each lesson came from
 
 Every lesson above has a fuller worked example in this repo. **Note on
@@ -1023,3 +1114,15 @@ rewrite, only the file it lived in moved.
   by both `src/dashboard/DashboardApp.tsx` and `src/report/ReportApp.tsx`.
   The Tailwind theme-variable wiring that keeps §8's dual light/dark
   selectors working — `@theme inline` in `src/styles/theme.css`.
+- Round 6 (the `axe-core` accessibility audit) — `docs/design/
+  mcp-ui-docker-ops.md` §11 item 10 and this guide's own §22. The
+  retuned, computed (not eyeballed) color tokens and the code comment
+  showing the exact contrast numbers — `src/styles/theme.css`'s `:root`
+  block. The `sonner`-not-wired-to-the-host-theme bug and its fix —
+  `useEffectiveTheme` in `src/lib/theme.ts`, used from
+  `src/dashboard/DashboardApp.tsx` and `src/report/ReportApp.tsx`, plus
+  the `[data-sonner-toaster]` variable override right below the token
+  block in `theme.css`. The audit script itself (nested-iframe `axe-core`
+  injection, eleven UI states) was scratch/temporary, never committed —
+  reproduce it from §22's recipe if you need to re-check after a future
+  change.

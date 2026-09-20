@@ -7,15 +7,28 @@
  * independent of the OS-level prefers-color-scheme, so BOTH selectors are
  * required or a host-driven theme switch silently does nothing.
  */
+/*
+ * --muted/--warning/--danger/--success below are darker than the values
+ * a color picker would first reach for (#6b7280/#f59e0b/#ef4444/#22c55e)
+ * — those looked fine by eye but fail WCAG AA's 4.5:1 text-contrast
+ * threshold on a white background (axe-core measured 4.44/2.15/3.76/2.28
+ * respectively; round 5's Radix migration made the confirm dialogs'
+ * focus handling correct by construction, but didn't touch color, so
+ * this was still open). --accent is left as-is: it's only ever used as
+ * a background/border/ring color in this codebase, never as text color,
+ * so its lower text-contrast ratio never applies. Dark mode's own shades
+ * already clear 4.5:1 with a lot of margin (6.8-11.5:1, measured) and
+ * are untouched.
+ */
 :root {
   --bg: #ffffff;
   --fg: #1a1a1a;
-  --muted: #6b7280;
+  --muted: #5f6b7a;
   --border: #e5e7eb;
   --accent: #3b82f6;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-  --success: #22c55e;
+  --warning: #b45309;
+  --danger: #b91c1c;
+  --success: #15803d;
   --card: #ffffff;
 }
 
@@ -113,4 +126,26 @@ body {
   color: var(--fg);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
+}
+
+/*
+ * sonner's own `richColors` palette (its --success-text/--error-text on
+ * [data-sonner-toaster][data-sonner-theme='light'|'dark']) fails WCAG AA
+ * in its light theme — axe-core measured 4.25:1 and 4.35:1 against its
+ * own tinted backgrounds, both under the 4.5:1 minimum for normal text.
+ * Re-point its color variables at our own tokens (already fixed above)
+ * instead of overriding sonner's colors a second time by hand — one
+ * source of truth for "what red/green means in this app," and it stays
+ * correct if the tokens above are ever retuned again. `!important` is
+ * deliberate here, not a specificity workaround: sonner's own rule sets
+ * these on the same selector at the same specificity, so without it,
+ * whichever import happens to land later in the bundle wins by
+ * accident — fragile in a way this isn't worth leaving to chance.
+ */
+[data-sonner-toaster][data-sonner-theme="light"],
+[data-sonner-toaster][data-sonner-theme="dark"] {
+  /* var(--success)/var(--danger) already resolve to the right light-
+     or dark-mode value on their own — no need to branch per theme here. */
+  --success-text: var(--success) !important;
+  --error-text: var(--danger) !important;
 }

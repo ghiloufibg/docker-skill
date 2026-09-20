@@ -2,6 +2,7 @@ import { RefreshCw } from "lucide-react";
 import * as React from "react";
 import { toast, Toaster } from "sonner";
 import { Button } from "@/components/ui/button";
+import { useEffectiveTheme } from "@/lib/theme";
 import { BulkToolbar } from "./BulkToolbar";
 import { CardList } from "./CardList";
 import { CardListSkeleton } from "./CardListSkeleton";
@@ -29,6 +30,7 @@ export function DashboardApp() {
 
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const { confirm, dialog } = useConfirm();
+  const toasterTheme = useEffectiveTheme();
   const detail = useContainerDetail();
 
   // Every docker-ps result (initial render, manual refresh, or the
@@ -293,7 +295,7 @@ export function DashboardApp() {
       )}
 
       {dialog}
-      <Toaster position="bottom-right" richColors closeButton />
+      <Toaster position="bottom-right" richColors closeButton theme={toasterTheme} />
     </main>
   );
 }

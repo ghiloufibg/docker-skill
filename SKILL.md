@@ -1,9 +1,9 @@
 ---
 name: docker-skill-system-card
-description: MCP-UI/Docker Ops experiment in this repo, Stages 0-5 plus advanced features, a fourth round of functional/UI-UX additions, and a fifth round rewriting the UI in React + Tailwind + shadcn/ui (the full staged plan). Shows a read-only local system card and a Docker fleet dashboard (list/inspect/logs/stats with optional live streaming, health status and resource limits, search/filter/sort, compose-project grouping with project-level teardown, multi-select bulk actions, toast notifications, plus tier-gated start/restart/pause/unpause/stop/kill/remove) as interactive MCP Apps, each with an "Investigate" button that hands root-cause analysis to the agent and has the agent report back via a structured investigation-report resource whose remediation suggestions can be gated one-click actions. Use when asked to test whether the current host renders MCP Apps UI resources, to check or manage local Docker containers through this repo's MCP server, or to continue the docker-skill design-to-implementation work described in docs/design/mcp-ui-docker-ops.md.
+description: MCP-UI/Docker Ops experiment in this repo, Stages 0-5 plus advanced features, a fourth round of functional/UI-UX additions, a fifth round rewriting the UI in React + Tailwind + shadcn/ui, and a sixth round accessibility audit (the full staged plan). Shows a read-only local system card and a Docker fleet dashboard (list/inspect/logs/stats with optional live streaming, health status and resource limits, search/filter/sort, compose-project grouping with project-level teardown, multi-select bulk actions, toast notifications, plus tier-gated start/restart/pause/unpause/stop/kill/remove) as interactive MCP Apps, each with an "Investigate" button that hands root-cause analysis to the agent and has the agent report back via a structured investigation-report resource whose remediation suggestions can be gated one-click actions. Use when asked to test whether the current host renders MCP Apps UI resources, to check or manage local Docker containers through this repo's MCP server, or to continue the docker-skill design-to-implementation work described in docs/design/mcp-ui-docker-ops.md.
 ---
 
-# docker-skill: MCP-UI spike, Stages 0-5 + advanced features + rounds 4-5 (complete)
+# docker-skill: MCP-UI spike, Stages 0-5 + advanced features + rounds 4-6 (complete)
 
 `docs/design/mcp-ui-docker-ops.md` §11 laid out five stages, all five —
 plumbing spike, read-only dashboard, logs/stats, investigation report,
@@ -101,6 +101,18 @@ deliberate override is initial focus landing on Cancel, not Radix's own
 default, per that same security-relevant rule. Cost: each resource is
 now roughly 2.2-2.6× its previous size (measured in design doc §6.1's
 update table) — accepted deliberately, not accidental bloat.
+
+**Round 6 (design doc §11 item 10): an `axe-core` accessibility audit,
+two real bugs found and fixed.** Four CSS color tokens
+(`--muted`/`--warning`/`--danger`/`--success`) failed WCAG AA's 4.5:1
+text-contrast minimum in light mode despite looking fine by eye —
+retuned to computed, verified values in `src/styles/theme.css`, with
+dark mode's own shades left alone since they already cleared 4.5:1 by
+a wide margin. Separately, the toast library (`sonner`) was never wired
+to the host-driven theme — a fresh instance of the exact dual-selector
+bug the design doc's §8/§12 already document, just inside a
+newly-added third-party component; fixed with `useEffectiveTheme` in
+`src/lib/theme.ts`. Full recipe in the guide's new §22.
 
 **Stage 3 — investigation report** (`build-investigation-report`,
 model-facing): both "Investigate" prompts end by telling the agent to

@@ -744,6 +744,64 @@ before the next is started:
      loading skeleton, guide §20) confirmed the spin class does toggle
      correctly, just faster than a fixed `waitForTimeout` reliably
      catches.
+10. *(not in the original numbered plan — round 6, an automated
+    accessibility audit of the round-5 rewrite, not a new feature)*
+    **`axe-core` run against all three resources across eleven distinct
+    UI states, real violations found and fixed.** **Status: done, zero
+    violations remaining, re-verified against every round-5 regression
+    check plus the audit itself.** Manual keyboard-accessibility testing
+    (§16 of the guide) checks focus/Tab-trap/Escape; it says nothing
+    about color contrast, which is exactly the gap an automated audit
+    tool closes. Injected `axe-core` directly into the correct doubly-
+    nested sandboxed iframe via Playwright (`elementHandle().
+    contentFrame()` twice, then `addScriptTag` + `axe.run()` inside
+    that frame's own document — a `FrameLocator` alone can't do this,
+    it needs the underlying `Frame` object) and ran it against: both
+    widgets' card/detail/tab states, both confirm-dialog tiers, the
+    bulk toolbar, and — critically, a state the first audit pass didn't
+    think to check and had to be added deliberately — an actual toast
+    notification on screen, not just a static layout. Two distinct
+    findings, both real:
+    - **Four of this project's own CSS design tokens
+      (`--muted`/`--warning`/`--danger`/`--success`) failed WCAG AA's
+      4.5:1 text-contrast threshold in light mode** — as low as 2.15:1
+      for the warning amber used on the per-card "Investigate" button.
+      They read as reasonable, distinct colors by eye; axe caught what
+      eyeballing a screenshot across four rounds of manual
+      "does this look right" checks never did, because color contrast
+      isn't something a human reviewer reliably self-audits without a
+      tool that actually measures it. Dark mode's equivalent shades
+      already cleared 4.5:1 with 6.8-11.5:1 to spare — only light mode
+      needed retuning, computed precisely (not eyeballed) via the WCAG
+      relative-luminance formula, then re-verified with the same
+      formula rather than trusted on sight.
+    - **`sonner`'s own `<Toaster>` was never wired to this project's
+      host-driven theme at all** — a genuinely new instance of the
+      *exact* dual-selector bug §8 documents from round 1, just in a
+      library component instead of hand-written CSS this time. Found
+      by coincidence while checking whether the project's own
+      (now-fixed) tokens also needed overriding inside `sonner`'s
+      built-in `richColors` palette: with the host switched to dark
+      mode, `sonner`'s `theme` prop (never set, so it defaulted to
+      `"light"`) left every toast rendering as a bright light-green
+      card floating on an otherwise-correctly-dark UI — functionally
+      fine, visually broken, and invisible to the axe audit itself
+      (color-contrast passes or fails independent of whether the two
+      colors involved are "the right theme"). Fixed with a small
+      `useEffectiveTheme()` hook (`src/lib/theme.ts`, shared by both
+      widgets that render a `<Toaster>`) that reads the same
+      `[data-theme]`-else-`prefers-color-scheme` precedence the CSS
+      itself already uses, kept live via a `MutationObserver` on
+      `documentElement` plus a `matchMedia` change listener, and feeds
+      the result into `<Toaster theme={...}>`. The lesson isn't really
+      about `sonner` specifically: **any third-party component with its
+      own theme prop needs to be wired to the same theme-resolution
+      logic as the rest of the page, explicitly** — a framework
+      migration (round 5) that brings in maintained UI primitives (a
+      real, durable win for the accessibility properties those
+      primitives implement correctly by construction, per §11 item 9)
+      doesn't make theme-wiring free; it just moves where the wiring
+      has to happen.
 
 ## 12. Open questions / risks
 

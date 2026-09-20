@@ -2,12 +2,14 @@ import * as React from "react";
 import { toast, Toaster } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/dashboard/ConfirmDialog";
+import { useEffectiveTheme } from "@/lib/theme";
 import { app, useIncomingReport } from "./mcp";
 import { TIER1_TOOLS, TOOL_LABELS, type RemediationAction } from "./types";
 
 export function ReportApp() {
   const report = useIncomingReport();
   const { confirm, dialog } = useConfirm();
+  const toasterTheme = useEffectiveTheme();
   const [actionInFlight, setActionInFlight] = React.useState(false);
   const [doneTools, setDoneTools] = React.useState<Set<string>>(new Set());
   const [status, setStatus] = React.useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -43,7 +45,7 @@ export function ReportApp() {
       <main className="main mx-auto max-w-xl p-4 text-sm text-muted">
         Waiting for a report…
         {dialog}
-        <Toaster position="bottom-right" richColors closeButton />
+        <Toaster position="bottom-right" richColors closeButton theme={toasterTheme} />
       </main>
     );
   }
@@ -134,7 +136,7 @@ export function ReportApp() {
       </section>
 
       {dialog}
-      <Toaster position="bottom-right" richColors closeButton />
+      <Toaster position="bottom-right" richColors closeButton theme={toasterTheme} />
     </main>
   );
 }

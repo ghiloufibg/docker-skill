@@ -12,10 +12,12 @@ security model, and staged plan.
 **Building your own MCP-UI server?** Skip the Docker-specific parts and
 read [`docs/guides/building-mcp-ui-servers.md`](docs/guides/building-mcp-ui-servers.md)
 instead — a project-agnostic field guide distilled from everything this
-repo's build-and-break-it process turned up, including twelve real bugs
-across four rounds of experimentation that were only ever found by
-actually rendering the page (or, for the streaming features, actually
-driving a real container restart against a real daemon).
+repo's build-and-break-it process turned up, including fourteen real
+bugs across six rounds of experimentation that were only ever found by
+actually running the thing — rendering the page, driving a real
+container restart against a real daemon for the streaming features, or
+running an automated accessibility audit (`axe-core`) for two
+contrast/theming bugs no amount of eyeballing screenshots had caught.
 
 ## Status
 
@@ -48,6 +50,16 @@ update and §12's table). The protocol layer, every tool, and the whole
 Docker-side server were untouched by this — it's a rendering-technique
 change, verified against the exact same feature set as every prior
 round with zero regressions found.
+
+**Round 6 note:** an `axe-core` accessibility audit across all three
+resources and eleven UI states found two real bugs the previous five
+rounds of manual review missed — four CSS color tokens that read fine
+by eye but failed WCAG AA's 4.5:1 text-contrast threshold (computed and
+retuned, not guessed at), and a toast-notification library never wired
+to the host-driven theme (a new instance of the exact dual-selector bug
+§8 of the guide already documents, just inside a third-party component
+this time). Both fixed; the audit and the full round-5 regression suite
+both re-verified clean afterward. See design doc §11 item 10.
 
 ```bash
 cd mcp-server
