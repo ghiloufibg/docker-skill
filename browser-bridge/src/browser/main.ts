@@ -27,6 +27,33 @@ function showError(message: string) {
   frameWrap.innerHTML = `<div id="error">${message.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</div>`;
 }
 
+/**
+ * Defense-in-depth on top of the iframe `sandbox` attribute: the sandbox
+ * blocks same-origin/cookie/storage access, but nothing stops sandboxed
+ * script from making its own outbound network calls or embedding further
+ * frames. This bridge carries all real data over `postMessage`, which CSP
+ * cannot see or restrict, so a rendered widget has no legitimate need for
+ * `connect-src`/`frame-src` of its own — this denies both by default.
+ * `font-src`/`img-src` allow `data:` because this repo's own widgets
+ * (Vite's `vite-plugin-singlefile`) inline their fonts as base64 data URIs;
+ * a third-party widget that legitimately needs live network access (e.g. a
+ * map tile layer) will need this relaxed for its own deployment — see
+ * README "Using this as a blueprint" for where to adapt it.
+ */
+function injectDefaultCsp(html: string): string {
+  const csp = [
+    "default-src 'none'",
+    "script-src 'unsafe-inline'",
+    "style-src 'unsafe-inline'",
+    "font-src data:",
+    "img-src data:",
+    "connect-src 'none'",
+    "frame-src 'none'",
+  ].join("; ");
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+  return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (tag) => `${tag}${meta}`) : `${meta}${html}`;
+}
+
 async function main() {
   const raw = document.getElementById("bridge-session")!.textContent ?? "{}";
   // Explicit assertion, not an inferred/annotated assignment: this is our
@@ -137,7 +164,7 @@ async function main() {
   // Set content only after the bridge is already listening, so the view's
   // own `ui/initialize` handshake (fired as soon as its script runs) is
   // never missed.
-  iframe.srcdoc = html;
+  iframe.srcdoc = injectDefaultCsp(html);
 }
 
 main().catch((err) => {

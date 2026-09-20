@@ -156,6 +156,15 @@ regardless:
   `_meta.ui.permissions` requests) and no `allow-same-origin` — an opaque,
   unique origin with no access to the wrapper page's or bridge's own
   cookies, storage, or DOM.
+- A `Content-Security-Policy` meta tag is injected into the widget's own
+  `<head>` (`injectDefaultCsp` in `src/browser/main.ts`), denying
+  `connect-src`/`frame-src` by default. The sandbox attribute alone doesn't
+  stop a widget from making its own network calls or nesting further
+  frames; since this bridge already carries all real data over
+  `postMessage` (which CSP can't see or restrict), a widget has no
+  legitimate need for either. A third-party widget that genuinely needs
+  live network access (e.g. map tiles) will need this relaxed for its own
+  deployment.
 
 What's **deliberately not here**, because the local/single-user assumption
 makes it not worth the complexity — add these first if you ever point this
