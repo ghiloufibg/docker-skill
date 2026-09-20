@@ -192,6 +192,28 @@ const ContainerDetailSchema = z.object({
   memLimitBytes: z.number().nullable(),
 });
 
+// Model-facing summaries for tools whose full detail belongs only in
+// structuredContent (see the token-consumption comments at each call site
+// below). Kept next to the schemas they summarize so a field added to one
+// prompts updating the other.
+function summarizeContainers(containers: z.infer<typeof ContainerSummarySchema>[]): string {
+  if (containers.length === 0) return "No containers found.";
+  const running = containers.filter((c) => c.state === "running");
+  const projects = new Set(containers.map((c) => c.project).filter((p): p is string => p !== null));
+  const runningNames = running.map((c) => c.name).join(", ");
+  return (
+    `${containers.length} container(s): ${running.length} running` +
+    (running.length > 0 ? ` (${runningNames})` : "") +
+    `, ${containers.length - running.length} not running, across ${projects.size} compose project(s) ` +
+    `plus any standalone containers. Full detail rendered in the UI.`
+  );
+}
+
+function summarizeContainerDetail(detail: z.infer<typeof ContainerDetailSchema>): string {
+  const health = detail.healthStatus ? ` (${detail.healthStatus})` : "";
+  return `${detail.name} — ${detail.image}, state: ${detail.state}${health}. Full detail rendered in the UI.`;
+}
+
 const ContainerStatsSchema = z.object({
   cpuPercent: z.number(),
   memUsageBytes: z.number(),
@@ -375,7 +397,17 @@ export function createServer(): McpServer {
       const containers = await listContainers();
       const payload = { containers };
       return {
-        content: [{ type: "text", text: JSON.stringify(payload) }],
+        // Token-consumption note: the dashboard widget reads exclusively
+        // from `structuredContent` (see src/dashboard/mcp.ts's
+        // `ontoolresult`), never from `content` — confirmed by reading its
+        // source, not assumed. `content` is what actually reaches the
+        // model's context (confirmed empirically: Claude Code CLI does not
+        // forward `structuredContent` to the model at all). Dumping the
+        // full container array into `content` therefore bought nothing for
+        // the UI and cost real tokens on every call — a compact summary
+        // here is model-sufficient (it still knows what exists to reason
+        // about) while the human gets full detail in the widget either way.
+        content: [{ type: "text", text: summarizeContainers(containers) }],
         structuredContent: payload,
       };
     },
@@ -398,7 +430,10 @@ export function createServer(): McpServer {
     async ({ id }): Promise<CallToolResult> => {
       const detail = await inspectContainer(id);
       return {
-        content: [{ type: "text", text: JSON.stringify(detail) }],
+        // Same rationale as docker-ps above: the Inspect tab reads
+        // structuredContent only, so content can be a compact summary
+        // instead of the full mounts/labels/ports/env-key dump.
+        content: [{ type: "text", text: summarizeContainerDetail(detail) }],
         structuredContent: detail,
       };
     },
@@ -516,7 +551,14 @@ export function createServer(): McpServer {
     },
     async (report): Promise<CallToolResult> => {
       return {
-        content: [{ type: "text", text: JSON.stringify(report) }],
+        // The agent wrote every field of `report` as this call's own
+        // arguments a moment ago — echoing the full object back in
+        // `content` cost tokens to restate data already in context, for
+        // zero informational gain. The report UI reads structuredContent
+        // (unchanged, full detail), same as every other tool here.
+        content: [
+          { type: "text", text: `Investigation report for "${report.subject}" recorded and rendered in the UI.` },
+        ],
         structuredContent: report,
       };
     },
