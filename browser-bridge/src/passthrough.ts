@@ -1,6 +1,13 @@
 import { Server } from "@modelcontextprotocol/server";
 import type { Client, CallToolResult, Tool } from "@modelcontextprotocol/client";
 
+/** The subset of `_meta.ui` this bridge understands, per the MCP Apps spec. */
+export interface ToolUiMeta {
+  resourceUri: string;
+  /** e.g. `{ microphone: {}, camera: {} }` — forwarded to the iframe's `allow` attribute. */
+  permissions?: Record<string, unknown>;
+}
+
 /**
  * Reimplemented locally instead of imported from
  * `@modelcontextprotocol/ext-apps/app-bridge` (the only subpath that
@@ -9,7 +16,7 @@ import type { Client, CallToolResult, Tool } from "@modelcontextprotocol/client"
  * `_meta.ui.resourceUri` form (preferred) or the deprecated flat
  * `_meta["ui/resourceUri"]` form, either of which must start with `ui://`.
  */
-function getToolUiResourceUri(tool: Partial<Tool>): string | undefined {
+function getToolUiMeta(tool: Partial<Tool>): ToolUiMeta | undefined {
   const meta = tool._meta as Record<string, unknown> | undefined;
   const nested = meta?.ui as Record<string, unknown> | undefined;
   const uri = (nested?.resourceUri as string | undefined) ?? (meta?.["ui/resourceUri"] as string | undefined);
@@ -17,7 +24,8 @@ function getToolUiResourceUri(tool: Partial<Tool>): string | undefined {
   if (!uri.startsWith("ui://")) {
     throw new Error(`Invalid ui.resourceUri on tool "${tool.name}": must start with "ui://", got "${uri}"`);
   }
-  return uri;
+  const permissions = nested?.permissions as Record<string, unknown> | undefined;
+  return { resourceUri: uri, permissions };
 }
 
 export interface UiHook {
@@ -31,7 +39,7 @@ export interface UiHook {
     toolName: string,
     args: Record<string, unknown> | undefined,
     result: CallToolResult,
-    resourceUri: string,
+    uiMeta: ToolUiMeta,
   ): Promise<{ linkText: string } | undefined>;
 }
 
@@ -84,9 +92,9 @@ export function createPassthroughServer(backend: Client, hook: UiHook): Server {
             toolsByName = new Map(tools.map((t) => [t.name, t]));
           }
           const tool = toolsByName.get(callParams.name);
-          const resourceUri = tool ? getToolUiResourceUri(tool) : undefined;
-          if (resourceUri) {
-            const note = await hook.onUiToolResult(callParams.name, callParams.arguments, result, resourceUri);
+          const uiMeta = tool ? getToolUiMeta(tool) : undefined;
+          if (uiMeta) {
+            const note = await hook.onUiToolResult(callParams.name, callParams.arguments, result, uiMeta);
             if (note) {
               return {
                 ...result,

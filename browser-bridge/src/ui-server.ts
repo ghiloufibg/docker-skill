@@ -1,12 +1,13 @@
 import http from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import open from "open";
 import { NodeStreamableHTTPServerTransport, localhostHostValidation } from "@modelcontextprotocol/node";
 import type { Client, CallToolResult } from "@modelcontextprotocol/client";
-import { createPassthroughServer } from "./passthrough.js";
+import { createPassthroughServer, type ToolUiMeta } from "./passthrough.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Built by `vite build` (see vite.config.ts) — kept in a separate output dir
@@ -18,8 +19,8 @@ interface Session {
   toolName: string;
   toolArgs: Record<string, unknown> | undefined;
   toolResult: CallToolResult;
-  resourceUri: string;
-  createdAt: number;
+  uiMeta: ToolUiMeta;
+  expiresAt: number;
 }
 
 export interface UiBridgeOptions {
@@ -29,6 +30,15 @@ export interface UiBridgeOptions {
   port?: number;
   /** Auto-launch the system browser when a new session is registered (default true). */
   autoOpen?: boolean;
+  /** How long an unopened session link stays valid, in ms (default 30 min). */
+  sessionTtlMs?: number;
+  /**
+   * File that `ui/message` payloads (the "Investigate"-button mechanism —
+   * see README "Known gaps") get appended to, one JSON object per line, in
+   * addition to the stderr log line. Defaults to a fixed path under the OS
+   * temp dir so it survives even if the terminal's scrollback doesn't.
+   */
+  messageInboxPath?: string;
 }
 
 /**
@@ -51,23 +61,39 @@ export class UiBridge {
   private readonly token = randomBytes(24).toString("base64url");
   private readonly sessions = new Map<string, Session>();
   private server: http.Server | undefined;
+  private backend: Client | undefined;
+  private cleanupTimer: NodeJS.Timeout | undefined;
   private baseUrl = "";
   private starting: Promise<void> | undefined;
+  private closed = false;
 
   constructor(opts: UiBridgeOptions) {
-    this.opts = { port: 0, autoOpen: true, ...opts };
+    this.opts = {
+      port: 0,
+      autoOpen: true,
+      sessionTtlMs: 30 * 60_000,
+      messageInboxPath: path.join(os.tmpdir(), "mcp-apps-browser-bridge-messages.jsonl"),
+      ...opts,
+    };
   }
 
   async registerSession(
     toolName: string,
     toolArgs: Record<string, unknown> | undefined,
     toolResult: CallToolResult,
-    resourceUri: string,
+    uiMeta: ToolUiMeta,
   ): Promise<{ linkText: string }> {
     await this.ensureStarted();
 
     const id = randomUUID();
-    this.sessions.set(id, { id, toolName, toolArgs, toolResult, resourceUri, createdAt: Date.now() });
+    this.sessions.set(id, {
+      id,
+      toolName,
+      toolArgs,
+      toolResult,
+      uiMeta,
+      expiresAt: Date.now() + this.opts.sessionTtlMs,
+    });
 
     const url = `${this.baseUrl}/app/${id}?token=${this.token}`;
     if (this.opts.autoOpen) {
@@ -87,14 +113,35 @@ export class UiBridge {
     };
   }
 
+  /** Closes the local HTTP server and its dedicated backend connection. Idempotent. */
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    await this.backend?.close().catch(() => undefined);
+    await new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
+  }
+
   private async ensureStarted(): Promise<void> {
+    if (this.closed) throw new Error("mcp-apps-browser-bridge: UiBridge already closed");
     if (this.server) return;
-    if (!this.starting) this.starting = this.start();
+    if (!this.starting) {
+      // If start() fails, clear `starting` so the *next* UI-bearing tool
+      // call gets a fresh attempt instead of forever re-awaiting (and
+      // re-throwing from) the same rejected promise — a transient failure
+      // (e.g. the port picked was momentarily taken) shouldn't be fatal for
+      // the whole remaining session.
+      this.starting = this.start().catch((err) => {
+        this.starting = undefined;
+        throw err;
+      });
+    }
     await this.starting;
   }
 
   private async start(): Promise<void> {
     const backend = await this.opts.spawnBackend();
+    this.backend = backend;
     const mcpServer = createPassthroughServer(backend, {
       // Browser-originated tool calls never need to re-trigger the bridge —
       // this hook only exists for the CLI-facing server (passthrough.ts).
@@ -121,12 +168,13 @@ export class UiBridge {
       if (appMatch) {
         if (url.searchParams.get("token") !== this.token) return this.deny(res);
         const session = this.sessions.get(appMatch[1]);
-        if (!session) {
+        if (!session || session.expiresAt < Date.now()) {
           res.writeHead(404, { "content-type": "text/plain" }).end("Unknown or expired session");
           return;
         }
         const bootstrap = {
-          resourceUri: session.resourceUri,
+          resourceUri: session.uiMeta.resourceUri,
+          permissions: session.uiMeta.permissions ?? {},
           toolName: session.toolName,
           toolArgs: session.toolArgs ?? {},
           toolResult: session.toolResult,
@@ -143,6 +191,7 @@ export class UiBridge {
       }
 
       if (url.pathname === "/message" && req.method === "POST") {
+        if (!this.hasValidToken(req, url)) return this.deny(res);
         this.handleAppMessage(req, res);
         return;
       }
@@ -159,7 +208,19 @@ export class UiBridge {
     const port = typeof address === "object" && address ? address.port : this.opts.port;
     this.baseUrl = `http://127.0.0.1:${port}`;
     this.server = server;
+    // Sessions are small (a tool result each) but unbounded without this —
+    // a long-running bridge process that keeps getting UI-bearing tool
+    // calls would otherwise leak memory for the life of the process.
+    this.cleanupTimer = setInterval(() => this.sweepExpiredSessions(), 60_000);
+    this.cleanupTimer.unref?.(); // never keep the process alive on its own
     console.error(`[browser-bridge] local UI companion listening on ${this.baseUrl} (loopback only)`);
+  }
+
+  private sweepExpiredSessions(): void {
+    const now = Date.now();
+    for (const [id, session] of this.sessions) {
+      if (session.expiresAt < now) this.sessions.delete(id);
+    }
   }
 
   private hasValidToken(req: http.IncomingMessage, url: URL): boolean {
@@ -176,20 +237,29 @@ export class UiBridge {
     const chunks: Buffer[] = [];
     req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
-      try {
-        const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
-        // v1, deliberate limitation: this bridge is a detached process, not
-        // the live Claude Code CLI conversation, so it cannot inject a real
-        // turn into that chat. It surfaces the request loudly instead of
-        // silently dropping it or faking success. See README "Known gaps".
-        console.error(
-          `[browser-bridge] the UI sent a message intended for the agent (not delivered ` +
-            `automatically — see README): ${JSON.stringify(body.content ?? body)}`,
-        );
-        res.writeHead(200, { "content-type": "application/json" }).end("{}");
-      } catch {
-        res.writeHead(400).end();
-      }
+      void (async () => {
+        try {
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          // v1, deliberate limitation: this bridge is a detached process, not
+          // the live CLI conversation, so it cannot inject a real turn into
+          // it. It surfaces the request loudly (stderr) AND durably (a JSON
+          // Lines inbox file, so it isn't lost to terminal scrollback)
+          // instead of silently dropping it or faking success. See README
+          // "Known gaps".
+          const entry = { receivedAt: new Date().toISOString(), ...body };
+          console.error(
+            `[browser-bridge] the UI sent a message intended for the agent (not delivered ` +
+              `automatically — see README; also appended to ${this.opts.messageInboxPath}): ` +
+              `${JSON.stringify(body.content ?? body)}`,
+          );
+          await fs.appendFile(this.opts.messageInboxPath, JSON.stringify(entry) + "\n", "utf-8").catch((err) => {
+            console.error(`[browser-bridge] could not write message inbox: ${(err as Error).message}`);
+          });
+          res.writeHead(200, { "content-type": "application/json" }).end("{}");
+        } catch {
+          res.writeHead(400).end();
+        }
+      })();
     });
   }
 }

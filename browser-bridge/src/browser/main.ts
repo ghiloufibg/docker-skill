@@ -1,10 +1,11 @@
 import { Client } from "@modelcontextprotocol/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
+import { AppBridge, PostMessageTransport, buildAllowAttribute } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { CallToolResult } from "@modelcontextprotocol/client";
 
 interface BridgeSession {
   resourceUri: string;
+  permissions: Record<string, unknown>;
   toolName: string;
   toolArgs: Record<string, unknown>;
   toolResult: CallToolResult;
@@ -51,6 +52,8 @@ async function main() {
   // single-iframe simplification of the spec's documented double-iframe
   // sandbox-proxy pattern (see README "Known gaps").
   iframe.setAttribute("sandbox", "allow-scripts allow-forms");
+  const allow = buildAllowAttribute(session.permissions as never);
+  if (allow) iframe.setAttribute("allow", allow);
   frameWrap.appendChild(iframe);
 
   const bridge = new AppBridge(
