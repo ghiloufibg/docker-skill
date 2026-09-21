@@ -51,6 +51,17 @@ export interface UiBridgeOptions {
   /** How long an unopened session link — or an idle browser MCP connection — stays valid, in ms (default 30 min). */
   sessionTtlMs?: number;
   /**
+   * Upper bound on concurrent browser MCP sessions (default 20). Each one
+   * spawns its own dedicated backend child process (see handleMcpRequest),
+   * so with no cap a client that repeatedly opens `/mcp` with no (or a
+   * stale) `Mcp-Session-Id` header — a buggy retry loop, or any other local
+   * process that has obtained the token — could spawn unbounded child
+   * processes, reaped only by the 30-minute idle sweep. This rejects new
+   * sessions over the cap with 503 *before* spawning a backend, rather than
+   * spawning first and discarding.
+   */
+  maxConcurrentSessions?: number;
+  /**
    * File that `ui/message` payloads (the "Investigate"-button mechanism —
    * see README "Known gaps") get appended to, one JSON object per line, in
    * addition to the stderr log line. Defaults to a fixed path under the OS
@@ -99,6 +110,7 @@ export class UiBridge {
       port: 0,
       autoOpen: true,
       sessionTtlMs: 30 * 60_000,
+      maxConcurrentSessions: 20,
       messageInboxPath: path.join(os.tmpdir(), "mcp-apps-browser-bridge-messages.jsonl"),
       ...opts,
     };
@@ -256,6 +268,17 @@ export class UiBridge {
     if (existing) {
       existing.lastActivityAt = Date.now();
       await existing.transport.handleRequest(req, res);
+      return;
+    }
+
+    if (this.mcpSessions.size >= this.opts.maxConcurrentSessions) {
+      res.writeHead(503, { "content-type": "application/json" }).end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Too many concurrent browser sessions" },
+          id: null,
+        }),
+      );
       return;
     }
 

@@ -30,11 +30,15 @@ import {
 } from "./docker/tools/actions.js";
 import { ensureSidecarStarted, SIDECAR_PORT } from "./docker/stream/sidecar.js";
 import { createLargeContentStore } from "./src/lib/large-content.js";
-import { DOCKER_ID_PATTERN } from "./docker/client.js";
+import { COMPOSE_PROJECT_PATTERN, DOCKER_ID_PATTERN } from "./docker/client.js";
 
 // Every tool input that names a container, not just a value this server
 // itself produced — see DOCKER_ID_PATTERN's own doc comment for why.
 const dockerIdSchema = z.string().regex(DOCKER_ID_PATTERN, "Invalid container id/name");
+
+// See COMPOSE_PROJECT_PATTERN's own doc comment for why this is here and
+// what it isn't protecting against.
+const composeProjectSchema = z.string().regex(COMPOSE_PROJECT_PATTERN, "Invalid compose project name");
 
 const execFileAsync = promisify(execFile);
 
@@ -751,7 +755,7 @@ export function createServer(): McpServer {
         "(see docker/tools/actions.ts for why). Permanently removes containers — irreversible. " +
         "Tier 2 (design doc §4) — off by default, requires confirm.",
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-      inputSchema: z.object({ project: z.string().describe("com.docker.compose.project label value") }),
+      inputSchema: z.object({ project: composeProjectSchema.describe("com.docker.compose.project label value") }),
       outputSchema: ComposeDownResultSchema,
       _meta: { ui: { resourceUri: dashboardUri } },
     },

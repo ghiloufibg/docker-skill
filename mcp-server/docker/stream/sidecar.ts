@@ -57,6 +57,7 @@ export interface SidecarInfo {
 // single-user, single-instance-at-a-time tool needs today; if multi-
 // instance use becomes real, start there.
 let started: SidecarInfo | null = null;
+let sidecarServer: http.Server | null = null;
 
 function timingSafeTokenMatch(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
@@ -87,7 +88,22 @@ export function ensureSidecarStarted(): SidecarInfo {
   server.listen(SIDECAR_PORT, "127.0.0.1");
 
   started = info;
+  sidecarServer = server;
   return info;
+}
+
+// Best-effort shutdown hook for index.ts's SIGINT/SIGTERM handler. Only
+// stops accepting new connections — it deliberately does NOT await
+// http.Server#close()'s callback, which only fires once every existing
+// connection ends. The Logs/Stats "Live" toggles hold open long-lived SSE
+// connections by design (see streamLogs/streamStats above), so waiting for
+// those to drain would turn a graceful-shutdown attempt into a hang on
+// exactly the feature this sidecar exists for. The process exits right
+// after this call anyway, which reclaims the port and any open sockets.
+export function closeSidecarIfStarted(): void {
+  sidecarServer?.close();
+  sidecarServer = null;
+  started = null;
 }
 
 async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse, token: string): Promise<void> {
