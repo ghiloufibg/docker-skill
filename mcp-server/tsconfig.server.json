@@ -12,5 +12,5 @@
     "esModuleInterop": true,
     "resolveJsonModule": true
   },
-  "include": ["server.ts", "index.ts", "test/smoke.ts"]
+  "include": ["server.ts", "index.ts", "test/smoke.ts", "test/load.ts"]
 }

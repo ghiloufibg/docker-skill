@@ -16,6 +16,7 @@
     "start:stdio": "node dist/index.js --stdio",
     "smoke": "npm run build 1>&2 && node dist/test/smoke.js",
     "test:ui": "vitest run",
+    "test:load": "npm run build 1>&2 && node dist/test/load.js",
     "lint": "eslint ."
   },
   "dependencies": {

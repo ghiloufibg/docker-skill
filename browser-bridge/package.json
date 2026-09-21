@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && tsc --noEmit -p tsconfig.browser.json && vite build",
     "start": "node dist/cli.js",
     "smoke": "npm run build 1>&2 && node dist/test/smoke.js",
+    "test:e2e": "playwright test",
     "lint": "eslint ."
   },
   "dependencies": {
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.0",
     "eslint": "^10.11.0",
     "typescript": "^5.9.3",

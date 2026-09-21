@@ -27,8 +27,23 @@ import type Docker from "dockerode";
 import { docker, DOCKER_ID_PATTERN } from "../client.js";
 import { computeStatsFromRaw } from "../tools/stats.js";
 
-const DEFAULT_PORT = 19943;
-export const SIDECAR_PORT = Number(process.env.DOCKER_SKILL_SIDECAR_PORT ?? DEFAULT_PORT);
+// Defaults to 0 (OS-assigned free port) rather than a fixed number, so two
+// independent instances of this server on the same machine (two separate
+// `node dist/index.js` processes — e.g. two Claude Code sessions each with
+// it registered) never collide on the same port; each gets its own,
+// genuinely free one. `DOCKER_SKILL_SIDECAR_PORT` still lets a caller pin a
+// specific port (e.g. for a reproducible manual test) if they want one.
+// Since the port is no longer known ahead of the sidecar actually binding,
+// the dashboard's CSP `connect-src` can't hard-code it either — it uses a
+// port wildcard instead (`http://127.0.0.1:*`, see server.ts's
+// registerHtmlResource call for the dashboard resource); CSP's grammar
+// supports `*` in the port position for exactly this "any port on this
+// fixed, already-trusted host" case, so this doesn't broaden what the CSP
+// actually protects against (the host is still pinned to loopback; the
+// real access control is the per-process random token below, unchanged).
+const SIDECAR_PORT_OVERRIDE = process.env.DOCKER_SKILL_SIDECAR_PORT
+  ? Number(process.env.DOCKER_SKILL_SIDECAR_PORT)
+  : 0;
 
 export interface SidecarInfo {
   port: number;
@@ -38,26 +53,16 @@ export interface SidecarInfo {
 // Module-level singleton: createServer() can in principle run more than
 // once in the same process (each stdio connection creates a fresh
 // McpServer, and so does the smoke test's multiple-session use), but the
-// sidecar is process-wide — a second .listen() on the same port would
-// throw EADDRINUSE. Every session in this process shares one sidecar and
-// one token, which is fine for a local, single-user tool.
-//
-// Known gap, not fixed here: this only dedupes within one process. Two
-// independent instances of this server (two separate `node dist/index.js`
-// processes on the same machine — e.g. two Claude Code sessions each with
-// it registered) both try the same fixed port. The second one's
-// server.listen() fails (logged, non-fatal — see the 'error' handler
-// below), but `started` is still set optimistically before that failure
-// can be known, so its stream-info tool hands out a token that was never
-// actually bound anywhere. The widget's EventSource then reaches the
-// FIRST process's sidecar with the SECOND process's token, gets 403, and
-// shows the generic "Live unavailable" — not wrong, but not diagnosable
-// either. Fixing this properly (OS-assigned port communicated back before
-// any tool advertises it, or a lock file) is more machinery than a local,
-// single-user, single-instance-at-a-time tool needs today; if multi-
-// instance use becomes real, start there.
+// sidecar is process-wide. Every session in this process shares one
+// sidecar and one token, which is fine for a local, single-user tool.
 let started: SidecarInfo | null = null;
 let sidecarServer: http.Server | null = null;
+// Guards concurrent callers (e.g. two "Live" toggles flipped in quick
+// succession before the first stream-info call resolves) — same pattern as
+// browser-bridge/src/ui-server.ts's UiBridge.ensureStarted/`starting`, for
+// the same reason: without it, a second caller arriving mid-bind would
+// start a *second* http.Server bind attempt on top of the first.
+let starting: Promise<SidecarInfo> | undefined;
 
 function timingSafeTokenMatch(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
@@ -66,30 +71,50 @@ function timingSafeTokenMatch(provided: string, expected: string): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-export function ensureSidecarStarted(): SidecarInfo {
-  if (started) return started;
+export function ensureSidecarStarted(): Promise<SidecarInfo> {
+  if (started) return Promise.resolve(started);
+  if (!starting) {
+    starting = startSidecar().finally(() => {
+      starting = undefined;
+    });
+  }
+  return starting;
+}
+
+function startSidecar(): Promise<SidecarInfo> {
   const token = crypto.randomBytes(24).toString("hex");
-  const info: SidecarInfo = { port: SIDECAR_PORT, token };
+  // Captured once the server actually binds (below) — every request
+  // handler closes over this rather than a fixed constant, since the real
+  // port is only known after listen() resolves when using the OS-assigned
+  // default.
+  let boundPort = 0;
 
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, token).catch((e) => {
+    handleRequest(req, res, token, boundPort).catch((e) => {
       console.error("streaming sidecar request error:", e);
       if (!res.headersSent) res.writeHead(500);
       res.end();
     });
   });
-  server.on("error", (e) => {
-    // Non-fatal: the dashboard's Live toggle degrades to "unavailable" if
-    // the sidecar never came up (see the widget's connection-error
-    // handling) — a port collision here should never take down the whole
-    // MCP server, which still works fine without live streaming.
-    console.error(`streaming sidecar failed to bind 127.0.0.1:${SIDECAR_PORT}:`, e.message);
-  });
-  server.listen(SIDECAR_PORT, "127.0.0.1");
 
-  started = info;
-  sidecarServer = server;
-  return info;
+  return new Promise<SidecarInfo>((resolve, reject) => {
+    server.once("error", (e) => {
+      // Non-fatal: the dashboard's Live toggle degrades to "unavailable" if
+      // the sidecar never came up (see the widget's connection-error
+      // handling) — a bind failure here should never take down the whole
+      // MCP server, which still works fine without live streaming.
+      console.error(`streaming sidecar failed to bind 127.0.0.1:${SIDECAR_PORT_OVERRIDE || "(OS-assigned)"}:`, e.message);
+      reject(e);
+    });
+    server.listen(SIDECAR_PORT_OVERRIDE, "127.0.0.1", () => {
+      const address = server.address();
+      boundPort = typeof address === "object" && address ? address.port : SIDECAR_PORT_OVERRIDE;
+      const info: SidecarInfo = { port: boundPort, token };
+      started = info;
+      sidecarServer = server;
+      resolve(info);
+    });
+  });
 }
 
 // Best-effort shutdown hook for index.ts's SIGINT/SIGTERM handler. Only
@@ -106,8 +131,13 @@ export function closeSidecarIfStarted(): void {
   started = null;
 }
 
-async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse, token: string): Promise<void> {
-  const url = new URL(req.url ?? "/", `http://127.0.0.1:${SIDECAR_PORT}`);
+async function handleRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  token: string,
+  boundPort: number,
+): Promise<void> {
+  const url = new URL(req.url ?? "/", `http://127.0.0.1:${boundPort}`);
   // No credentials/cookies are ever used for auth here (the token in the
   // query string is the only credential, handed out over a private
   // channel per the module doc above), so a wildcard origin doesn't leak

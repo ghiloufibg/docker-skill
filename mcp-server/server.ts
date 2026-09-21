@@ -5,8 +5,12 @@ import {
 } from "@modelcontextprotocol/ext-apps/server";
 import {
   McpServer,
+  acceptedContent,
+  inputRequired,
   type CallToolResult,
+  type InputRequiredResult,
   type ReadResourceResult,
+  type ServerContext,
 } from "@modelcontextprotocol/server";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
@@ -28,7 +32,7 @@ import {
   removeContainer,
   stopComposeProject,
 } from "./docker/tools/actions.js";
-import { ensureSidecarStarted, SIDECAR_PORT } from "./docker/stream/sidecar.js";
+import { ensureSidecarStarted } from "./docker/stream/sidecar.js";
 import { createLargeContentStore } from "./src/lib/large-content.js";
 import { COMPOSE_PROJECT_PATTERN, DOCKER_ID_PATTERN } from "./docker/client.js";
 
@@ -39,6 +43,44 @@ const dockerIdSchema = z.string().regex(DOCKER_ID_PATTERN, "Invalid container id
 // See COMPOSE_PROJECT_PATTERN's own doc comment for why this is here and
 // what it isn't protecting against.
 const composeProjectSchema = z.string().regex(COMPOSE_PROJECT_PATTERN, "Invalid compose project name");
+
+// Opportunistic upgrade for Tier 2 (destructive) actions, using the MCP
+// 2026-07-28 multi-round-trip elicitation mechanism (`inputRequired`/
+// `inputRequired.elicit()`) verified working end-to-end at the SDK level —
+// see the design doc's round-2 write-up. Today's actual backstop for Tier 2
+// actions is the UI's own type-to-confirm dialog plus the host's MCP
+// permission prompt (SKILL.md's "known, deliberate gap": the dialog is this
+// iframe's own JS, not server-verified). This closes that gap for any host
+// that declares the `elicitation` capability, by making the SERVER itself
+// require a native, host-collected confirmation before the action runs — one
+// a compromised or buggy widget can't skip by construction.
+//
+// For every currently-known host (none declare `elicitation` yet — see
+// SKILL.md's "still unconfirmed" note), `getClientCapabilities().elicitation`
+// is simply absent, so this returns `undefined` immediately and every Tier 2
+// tool runs exactly as it always has. No existing behavior changes; this
+// only activates for a host that doesn't exist yet, so it's forward-wiring,
+// not a verified end-to-end fix — see the browser-bridge rendering test for
+// the one piece of this that *is* exercised today (the dashboard/report's
+// own UI-side confirm dialog, which stays the enforcement path for every
+// client this server has actually been run against).
+function tier2Confirmation(server: McpServer, ctx: ServerContext, message: string): InputRequiredResult | undefined {
+  if (!server.server.getClientCapabilities()?.elicitation) return undefined;
+  const confirmed = acceptedContent<{ confirm: boolean }>(ctx.mcpReq.inputResponses, "confirm");
+  if (confirmed?.confirm) return undefined;
+  return inputRequired({
+    inputRequests: {
+      confirm: inputRequired.elicit({
+        message,
+        requestedSchema: {
+          type: "object",
+          properties: { confirm: { type: "boolean" } },
+          required: ["confirm"],
+        },
+      }),
+    },
+  });
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -544,8 +586,8 @@ export function createServer(): McpServer {
       outputSchema: StreamInfoSchema,
       _meta: { ui: { visibility: ["app"] } },
     },
-    (): CallToolResult => {
-      const info = ensureSidecarStarted();
+    async (): Promise<CallToolResult> => {
+      const info = await ensureSidecarStarted();
       return { content: [{ type: "text", text: JSON.stringify(info) }], structuredContent: info };
     },
   );
@@ -555,7 +597,12 @@ export function createServer(): McpServer {
     dashboardUri,
     "docker-dashboard.html",
     "Docker Fleet Dashboard UI",
-    { connectDomains: [`http://127.0.0.1:${SIDECAR_PORT}`] },
+    // Port wildcard, not a fixed number: the sidecar now binds an
+    // OS-assigned port (docker/stream/sidecar.ts) so two instances of this
+    // server never collide, which means the exact port isn't known yet when
+    // this HTML is served — see that file's own doc comment for why a
+    // port-only wildcard here doesn't broaden what the CSP protects against.
+    { connectDomains: ["http://127.0.0.1:*"] },
   );
 
   // ===========================================================================
@@ -699,7 +746,9 @@ export function createServer(): McpServer {
       outputSchema: ActionResultSchema,
       _meta: { ui: { resourceUri: dashboardUri } },
     },
-    async ({ id }): Promise<CallToolResult> => {
+    async ({ id }, ctx): Promise<CallToolResult | InputRequiredResult> => {
+      const pending = tier2Confirmation(server, ctx, `Stop container "${id}"? This is a Tier 2 (destructive) action.`);
+      if (pending) return pending;
       const result = await stopContainer(id);
       return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
     },
@@ -718,7 +767,9 @@ export function createServer(): McpServer {
       outputSchema: ActionResultSchema,
       _meta: { ui: { resourceUri: dashboardUri } },
     },
-    async ({ id }): Promise<CallToolResult> => {
+    async ({ id }, ctx): Promise<CallToolResult | InputRequiredResult> => {
+      const pending = tier2Confirmation(server, ctx, `Kill container "${id}"? This is a Tier 2 (destructive) action.`);
+      if (pending) return pending;
       const result = await killContainer(id);
       return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
     },
@@ -738,7 +789,13 @@ export function createServer(): McpServer {
       outputSchema: z.object({ id: z.string() }),
       _meta: { ui: { resourceUri: dashboardUri } },
     },
-    async ({ id }): Promise<CallToolResult> => {
+    async ({ id }, ctx): Promise<CallToolResult | InputRequiredResult> => {
+      const pending = tier2Confirmation(
+        server,
+        ctx,
+        `Remove container "${id}"? This is permanent and cannot be undone (Tier 2).`,
+      );
+      if (pending) return pending;
       const result = await removeContainer(id);
       return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
     },
@@ -759,7 +816,13 @@ export function createServer(): McpServer {
       outputSchema: ComposeDownResultSchema,
       _meta: { ui: { resourceUri: dashboardUri } },
     },
-    async ({ project }): Promise<CallToolResult> => {
+    async ({ project }, ctx): Promise<CallToolResult | InputRequiredResult> => {
+      const pending = tier2Confirmation(
+        server,
+        ctx,
+        `Tear down compose project "${project}"? This stops and permanently removes every container in it (Tier 2).`,
+      );
+      if (pending) return pending;
       const result = await stopComposeProject(project);
       return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
     },

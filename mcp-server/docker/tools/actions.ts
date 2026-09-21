@@ -83,16 +83,36 @@ export async function stopComposeProject(project: string): Promise<ComposeDownRe
     all: true,
     filters: { label: [`com.docker.compose.project=${project}`] },
   });
-  const removed: string[] = [];
-  for (const c of containers) {
-    const name = c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12);
-    const container = docker.getContainer(c.Id);
-    if (c.State === "running" || c.State === "paused") {
-      if (c.State === "paused") await container.unpause();
-      await container.stop();
-    }
-    await container.remove();
-    removed.push(name);
-  }
+  // Parallel, not sequential: found by load-testing this against 25 real
+  // containers, not reasoned about in the abstract. Each container's own
+  // .stop() pays Docker's default ~10s SIGTERM-then-SIGKILL grace period
+  // whenever the container's PID 1 doesn't handle SIGTERM (the common
+  // case — PID 1 gets no *default* disposition for a signal it hasn't
+  // explicitly handled, unlike every other process) — stopping containers
+  // one at a time summed those waits linearly and blew past the MCP
+  // client's own 60s request timeout well before a 25-container project
+  // finished, even though every container was, in fact, still being torn
+  // down correctly in the background.
+  //
+  // This is safe to parallelize, unlike the dashboard's own bulk-action
+  // loop (design doc §11 item 8), which deliberately stays sequential:
+  // that sequencing exists to stop *separate* tool calls (one per
+  // selected container) from racing each other's actionInFlight/refresh
+  // cycle on the client side. This function is one already-atomic server
+  // call tearing down one already-identified project — nothing observes
+  // or refreshes state mid-way through it, so there's no equivalent race
+  // to protect against by staying sequential here.
+  const removed = await Promise.all(
+    containers.map(async (c) => {
+      const name = c.Names[0]?.replace(/^\//, "") ?? c.Id.slice(0, 12);
+      const container = docker.getContainer(c.Id);
+      if (c.State === "running" || c.State === "paused") {
+        if (c.State === "paused") await container.unpause();
+        await container.stop();
+      }
+      await container.remove();
+      return name;
+    }),
+  );
   return { project, removed };
 }
