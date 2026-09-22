@@ -87,3 +87,13 @@ gated remediation buttons all genuinely work. **What's still open is the
 Claude Code CLI specifically** — the reference host isn't Claude Code —
 see the design doc §12 and `SKILL.md` for the full picture and what to
 check next.
+
+## Other skills in this repo
+
+[`skills/mimir/`](skills/mimir/SKILL.md) is an unrelated Claude Code skill
+also published from this repo: given a feature/requirement, it produces a
+detailed implementation plan for a Java 21 (LTS, never newer) backend built
+with strict Hexagonal Architecture — domain model, ports, use-case
+services, adapter skeletons, package layout, and a testing strategy. It has
+no connection to the Docker Ops/MCP-UI work above; it lives here purely for
+publishing convenience.
