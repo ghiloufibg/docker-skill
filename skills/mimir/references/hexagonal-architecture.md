@@ -77,6 +77,32 @@ language/tooling) in the plan's testing section — it's the one test that
 turns the six non-negotiable rules from a one-time design decision into
 something the codebase keeps automatically.
 
+**Before recommending Testcontainers for the `adapter/out` (persistence) row,
+confirm the project's CI can actually run Docker** — check the CI config
+(`.github/workflows/*.yml`, `.gitlab-ci.yml`, `Jenkinsfile`,
+`azure-pipelines.yml`, `bitbucket-pipelines.yml`) for a Docker-in-Docker or
+`services: docker` setup, or ask the user directly if it's unclear. Never
+assume Docker is available. If it isn't, don't plan Testcontainers into the
+persistence adapter tests — that produces a plan whose tests can't run where
+they need to. Instead:
+- Default to an in-memory substitute (H2 or equivalent) for the adapter
+  tests, and state the known divergence from the production engine
+  (dialect-specific SQL, constraint/locking behavior) as an explicit
+  **Assumption** in the plan's assumptions section (see
+  `output-template.md` section 2) — a named, accepted trade-off, not a
+  silently lowered bar.
+- Lean more heavily on the `application`/`usecase` layer's fakes for the
+  mapping and query logic that would otherwise be covered by a
+  real-engine test, since that layer's tests aren't Docker-dependent.
+- If it's useful to the team, plan can note the option of a separate,
+  optional CI lane with Docker access (a manually triggered workflow, a
+  nightly job) for real-engine coverage — phrased as a suggestion for the
+  team to decide on, not a requirement of the plan.
+
+A test suite that's mostly unit/fake-backed tests with a small
+integration slice is the correct shape for a Docker-less CI, not a gap to
+close.
+
 ## Result/error handling across the boundary
 
 Recommend a sealed result type for **expected** outcomes a use case can

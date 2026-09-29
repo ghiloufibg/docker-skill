@@ -97,3 +97,11 @@ with strict Hexagonal Architecture — domain model, ports, use-case
 services, adapter skeletons, package layout, and a testing strategy. It has
 no connection to the Docker Ops/MCP-UI work above; it lives here purely for
 publishing convenience.
+
+[`skills/forseti/`](skills/forseti/SKILL.md) is `mimir`'s companion: given
+already-written Java 21 / Spring Boot 3.x code built on that same
+Hexagonal Architecture, it reviews it and produces a severity-ranked
+findings report — boundary violations, modern Java/Spring idiom gaps, test
+quality anti-patterns, and a strict zero-comments/zero-Javadoc policy.
+Where `mimir` plans before code exists, `forseti` judges it after. Also
+unrelated to the Docker Ops/MCP-UI work above.

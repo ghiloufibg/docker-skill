@@ -12,6 +12,11 @@ written — domain model, ports, use cases, adapters, package layout, and how
 each layer will be tested. It does not write the business logic itself; that
 is a job for `/sc:implement` or the developer, once the plan exists.
 
+Once that code is written, `forseti` (`skills/forseti/SKILL.md`, if
+available in this repo) reviews it against this same hexagon and reports
+findings — the two skills are meant to be used in sequence, plan then
+judge, not as alternatives to each other.
+
 The constraint that makes the plan trustworthy: **strict Hexagonal
 Architecture, and Java no newer than 21 (LTS)**. Every design decision below
 exists to keep the domain provably independent of frameworks and infrastructure,
