@@ -20,7 +20,7 @@ strategy mentions Testcontainers or a real-database test.
 
 ## How each checklist applies to a plan
 
-| Checklist | In plan mode |
+| Checklist | In plan-review mode |
 |---|---|
 | `hexagonal-boundary-checklist.md` (Checks 1–6) | Applies in full, to planned signatures, imports/annotations the plan assigns to a class, package layout, and mapper placement. A planned domain record annotated for JPA is Check 1; a planned port returning an adapter DTO is Check 5. |
 | `java21-modern-idioms.md` | Applies to what a plan can show: `Optional` placement in planned signatures, records vs Lombok, mapper approach, builder vs large constructors, the Java 21 ceiling. **Skip** the magic-literal, `final`/`var`, and stream-vs-loop checks — there is no implementation code to judge. |
@@ -32,7 +32,7 @@ strategy mentions Testcontainers or a real-database test.
 ## Read only the sections that apply
 
 The checklist files are long and much of each is about implementation code.
-In plan mode, find the section headings (grep for `^## `) and read only
+In plan-review mode, find the section headings (lines starting with `## `, using whichever search or read tool is available) and read only
 these sections, not the whole file:
 
 | File | Sections to read |
@@ -75,7 +75,7 @@ of scope, and a component or test that traces to no requirement. If the
 plan has no such section, do not demand one — that is outside this skill's
 rules.
 
-## Severity in plan mode
+## Severity in plan-review mode
 
 Same three tiers, judged by what happens if the plan is implemented as
 written:

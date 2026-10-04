@@ -211,7 +211,7 @@ the delivery summary.
 
 ### 7. Review the design with forseti
 
-Run `forseti` in plan mode (the forseti skill's `references/plan-review.md`) on
+Run `forseti` in plan-review mode (the forseti skill's `references/plan-review.md`) on
 the design sections. Ask for **findings only, returned inline**: per
 finding the severity, plan location, one-line reason and fix — no summary
 table, no Strengths section, and **no file written** (forseti normally saves

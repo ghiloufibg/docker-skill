@@ -91,7 +91,7 @@ suffix and everything in Check 5: **Recommended**. Naming alone is never
 Critical. Group repeated hits into one finding with an `Also at:` list, per
 the output template.
 
-## In plan mode
+## In plan-review mode
 
 The same checks apply to planned class, method and field names, and to the
 plan's glossary if it has one: a name in the plan that fails these checks

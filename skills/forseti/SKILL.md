@@ -18,7 +18,7 @@ Where `mimir` designs the hexagon before code exists, `forseti` judges that
 design (the plan) and, later, the code written from it, against the same
 hexagon and a set of Java 21 / Spring Boot 3.x idiom rules. It runs in one
 of two modes, chosen by what it is handed: **code mode** (source files, a
-diff, a PR) or **plan mode** (a design or implementation plan document —
+diff, a PR) or **plan-review mode** (a design or implementation plan document —
 see "Reviewing a plan instead of code" below). If the mimir skill is installed alongside this one, read its
 `references/hexagonal-architecture.md` and `references/java21-standards.md`
 first — this skill's boundary checklist restates their rules as review
