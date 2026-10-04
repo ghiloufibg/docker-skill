@@ -15,6 +15,12 @@ blockers, "relates to", subtasks — one hop, no crawling):
 - Labels, components, fix version
 - Every Confluence link anywhere in the above, including remote links
 
+**Fetch discipline.** Fetch only the fields above. Never fetch attachments,
+images, screenshots, or change history unless a requirement explicitly
+depends on one (then say which and why). For a long comment thread, read
+all of it but record only the decisions, clarifications and open points on
+the card, not the conversation.
+
 Record the ticket's last-updated timestamp; the plan header carries it so a
 reader can tell whether the ticket changed after the plan was written.
 

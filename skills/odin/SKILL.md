@@ -83,7 +83,9 @@ message.
 Read, per `references/ticket-analysis.md`: type, summary, description,
 acceptance criteria, comments, linked issues, parent epic, subtasks, labels,
 components, fix version, and every Confluence link in any of those. Record
-each source as an evidence card with a `[J#]` id. Branch on ticket type:
+each source as an evidence card with a `[J#]` id. Fetch only these fields;
+never attachments, images or change history unless a requirement depends on
+them. Branch on ticket type:
 
 - **Story / task**: the full workflow below.
 - **Bug**: add root-cause hypotheses and a regression-test plan to the
@@ -104,7 +106,8 @@ to"), becomes a doubt.
 ### 3. Find the Confluence context
 
 Follow `references/confluence-discovery.md`: explicit links first, then
-targeted search, within a page budget. Turn each page into an evidence card
+targeted search, within a page budget; read titles and snippets before any
+full page, and stop once the doubts are resolved. Turn each page into an evidence card
 `[C#]` immediately (what matters, which `R#` it touches, last-modified date,
 staleness flag) so raw page text doesn't have to stay in context. Where a
 page contradicts the ticket or another page, don't pick a winner — it
@@ -120,9 +123,16 @@ resolved with their citation. Do **not** ask the user anything yet.
 
 Read, read-only: `pom.xml`, the existing package layout, and the ports,
 adapters and aggregates near the change. Record each file as `[F#]`, the
-modules affected, and what can be reused. Use `forseti` (code mode) on the
-affected area only as a bounded baseline, so the plan notes existing
-violations it must not copy. Code can resolve or add doubts.
+modules affected, and what can be reused. Code can resolve or add doubts.
+
+Existing violations the plan must not copy are found with a **narrow
+baseline**, only when the ticket changes existing classes: run `forseti`
+in code mode with only its hexagonal boundary and naming checklists
+(`hexagonal-boundary-checklist.md`, `naming-checklist.md`), on the few files
+the change will touch (about 10 at most), and return findings only (see
+step 7 for the return format). Skip the baseline entirely for a feature that
+adds new code with no existing class to touch, and do not run forseti's
+idiom, Spring, test or comment passes here — they don't inform a plan.
 
 ### The open-question gate
 
@@ -154,9 +164,13 @@ the delivery summary.
 ### 7. Review the design with forseti
 
 Run `forseti` in plan mode (`skills/forseti/references/plan-review.md`) on
-the design sections. Fix Critical and Important findings in one revision
-pass; list whatever remains in the plan's Design Review section as fixed,
-accepted, or open. One pass only — no review loops.
+the design sections. Ask for **findings only, returned inline**: per
+finding the severity, plan location, one-line reason and fix — no summary
+table, no Strengths section, and **no file written** (forseti normally saves
+long reviews to `claudedocs/`; that would break the rule that nothing is
+written before the user confirms). Fix Critical and Important findings in
+one revision pass; list whatever remains in the plan's Design Review
+section as fixed, accepted, or open. One pass only — no review loops.
 
 ### 8. Trace and slice
 

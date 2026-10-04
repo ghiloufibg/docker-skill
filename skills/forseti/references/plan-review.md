@@ -29,6 +29,23 @@ strategy mentions Testcontainers or a real-database test.
 | `test-quality-checklist.md` | Applies to the plan's testing strategy: a planned mock of a value object or record, a planned test type that doesn't match its layer, a persistence strategy the confirmed CI can't run. |
 | `no-comments-policy.md` | **Does not apply.** Pseudocode and commented orchestration steps in a plan are documentation of intent, not code under review. |
 
+## Read only the sections that apply
+
+The checklist files are long and much of each is about implementation code.
+In plan mode, find the section headings (grep for `^## `) and read only
+these sections, not the whole file:
+
+| File | Sections to read |
+|---|---|
+| `java21-modern-idioms.md` | Optional; Records instead of Lombok POJOs; MapStruct; Builder pattern; Sealed interfaces + pattern matching |
+| `spring-boot3-practices.md` | Constructor injection only; ProblemDetail / RFC 7807; `@Transactional` correctness; JPA fetch strategy and N+1; `@ConfigurationProperties` over scattered `@Value` |
+| `test-quality-checklist.md` | The core rule, Check 1, Check 2, Check 7 |
+| `hexagonal-boundary-checklist.md` | All six checks |
+| `naming-checklist.md` | All |
+
+Read a spring section only if the plan touches that topic. Skip the
+remaining sections; they judge implementation code a plan doesn't contain.
+
 ## Plan-specific checks
 
 These have no code equivalent. Each finding names the plan section and
@@ -72,6 +89,14 @@ written:
   mock of a record).
 - **RECOMMENDED** — a judgment call (a split of a borderline use case, a
   builder for a borderline record).
+
+## When another skill calls this review
+
+If a calling skill (for example `odin`) asks for findings only, return a
+compact inline list: severity, plan location, one-line reason, fix. Leave
+out the summary table, the Strengths section and the code fences around
+quoted plan text, and do not save a report file — the caller owns what gets
+written.
 
 ## Location and fix format
 

@@ -19,6 +19,14 @@ Read in full at most about **8 pages**; consider at most about **15**
 (titles and snippets). If the budget isn't enough, say so in the plan and
 list what was left unread rather than silently dropping it.
 
+**Read cheaply.** Look at titles and snippets first and open a page in full
+only when its snippet is relevant to a requirement or doubt. Where the
+confluence skill can return a section or heading instead of the whole page,
+ask for that section. Never read attachments, page history or page comments
+unless a requirement depends on them. **Stop early**: once every open doubt
+is resolved or clearly can't be answered from Confluence, stop reading
+pages even if budget remains.
+
 ## Ranking
 
 Prefer, in order: ADRs and standards, API or contract specs, design

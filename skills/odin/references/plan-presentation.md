@@ -40,8 +40,12 @@ satisfies it, then keep the document consistent:
 - Update every place the change touches: citations, the requirements
   register, the glossary, the traceability matrix, the implementation
   slices, and the status if it changes.
-- Re-run the `forseti` plan review on the changed design sections only, and
-  the traceability check on the whole plan. Fix anything the change broke.
+- Re-run the `forseti` plan review only when the change touches the design
+  (domain model, ports, use cases, adapters, package layout, testing
+  strategy, naming), and then on the changed design sections only, with
+  findings returned inline. A wording, ordering or formatting change skips
+  the review. Always re-run the traceability check on the whole plan; it is
+  cheap. Fix anything the change broke.
 - If the change needs facts from Jira or Confluence, read them (read-only)
   and add evidence cards.
 - If a change contradicts a source, say so and apply it only if the user
