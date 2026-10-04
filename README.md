@@ -90,7 +90,7 @@ check next.
 
 ## Other skills in this repo
 
-[`skills/mimir/`](skills/mimir/SKILL.md) is an unrelated Claude Code skill
+[`skills/mimir/`](skills/mimir/SKILL.md) is an unrelated agent skill
 also published from this repo: given a feature/requirement, it produces a
 detailed implementation plan for a Java 21 (LTS, never newer) backend built
 with strict Hexagonal Architecture — domain model, ports, use-case

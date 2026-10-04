@@ -11,6 +11,7 @@ the plan isn't finished. Cite sources inline with
 # <KEY>: <title> — Technical Implementation Plan
 (raw mode has no key: `# <title> — Technical Implementation Plan`)
 
+Plan id: <KEY | slug>
 Status: <Ready | Draft (assumptions accepted) | Contingent | Blocked on questions>
 Source: <Jira <KEY>, last updated <timestamp> | requirements provided in the prompt>
 Generated: <date> · Skills: odin, mimir, forseti
@@ -76,16 +77,40 @@ Section 10 is never shortened.
 
 ## Partial plan (stop path)
 
-Sections 1–4 and 10 only, status `Blocked on questions`, with section 4's
-Open list as the point of the document: it should be usable as-is to send
-to the person who can answer.
+Sections 1–4 plus the Resources appendix (section 10), status
+`Blocked on questions`. Section 4's Open list is the point of the document:
+it should be usable as-is to send to the person who can answer. Sections
+5–9 are omitted, not left empty.
 
 ## Spike variant
 
-Replace sections 5–8 with: Question, Options with trade-offs, Recommendation,
-What remains unknown. Keep 1–4, 9 and 10.
+Same header and sections 1–4. Then, in this order and with these numbers:
+
+- 5. Question — what the spike must answer, and what a good answer lets
+  the team decide.
+- 6. Options — a table: option, how it works, benefits, drawbacks, cost or
+  effort if known, evidence `[J#] [P#] [C#] [F#]`. At least two options.
+- 7. Recommendation — one option, and why, in terms of the requirements.
+- 8. What remains unknown — questions the spike could not close, and what
+  would close each.
+- 9. Risks and Next Steps — risks of the recommendation, and the follow-up
+  work (typically: "plan this feature" with the chosen option as input).
+- 10. Resources.
+
+A spike has no hexagon design, review section, traceability matrix or
+implementation slices.
 
 ## Bug variant
 
-Add to section 5: root-cause hypotheses ranked with evidence, and the
-regression test that would have caught it.
+Same header and the same ten sections as a feature plan, with these
+additions:
+
+- Section 1 states the symptom, the expected behaviour and the reproduction
+  steps (marked "not provided" when absent).
+- Section 5 opens with **5.0 Root-cause analysis**: hypotheses ranked by
+  likelihood, each with the evidence for and against `[F#] [J#] [C#]`, and
+  the check that would confirm it.
+- Section 8's first slice is the failing regression test that reproduces
+  the bug; the fix slices follow it.
+- Section 7 traces the bug's requirements (expected behaviour) to that
+  test.

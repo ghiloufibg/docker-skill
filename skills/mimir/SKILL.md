@@ -1,6 +1,6 @@
 ---
 name: mimir
-description: Turns a feature or requirement description into a detailed, ready-to-implement plan for a Java backend (Java 21 LTS or earlier — never newer) built with strict Hexagonal Architecture (Ports & Adapters). Produces the domain model (records, sealed types, value objects), inbound/outbound port interfaces, use-case/application services, adapter skeletons, package layout, dependency-boundary rules, and a layer-by-layer testing strategy — not full production code. Use this whenever the user asks to design, architect, or plan a Java feature, service, or module; mentions hexagonal architecture, ports and adapters, clean/onion architecture, DDD, bounded contexts, aggregates; or asks how to structure a Java backend before writing code — even without saying "hexagonal" explicitly, e.g. "how should I structure this Java service", "give me an implementation plan for order cancellation", "design the module for X". If the input is a Jira ticket, or raw requirements that still need analysis, clarification or documentation lookup, and the odin skill is available, use odin instead — it gathers the requirements and calls this skill; use this skill directly for a single feature that is already clear. Do NOT use for non-Java stacks, for reviewing or refactoring already-written code, or when the user wants hand-written method bodies rather than a plan.
+description: Turns a feature or requirement into a ready-to-implement plan for a Java backend (Java 21 LTS or earlier, never newer) built with strict Hexagonal Architecture (Ports & Adapters). Produces a domain model (records, sealed types, value objects) named in the business's own language, inbound and outbound ports, use-case services, adapter skeletons, package layout, dependency-boundary rules and a layer-by-layer testing strategy, as a plan and not full code. Use when the user asks to design, architect or plan a Java feature, service or module, mentions hexagonal or clean architecture, ports and adapters, DDD or aggregates, or asks how to structure a Java backend before writing code. If the input is a Jira ticket, or raw requirements that still need analysis or clarification, and the odin skill is available, use odin instead. Do NOT use for non-Java stacks, for reviewing or refactoring existing code, or for hand-written method bodies.
 ---
 
 # Mimir — the Hexagonal Java Architect
@@ -10,9 +10,9 @@ after. This skill works the same way: it turns a feature or requirement into
 a **plan a developer can implement from**, produced *before* any code is
 written — domain model, ports, use cases, adapters, package layout, and how
 each layer will be tested. It does not write the business logic itself; that
-is a job for `/sc:implement` or the developer, once the plan exists.
+is a job for the developer or a coding agent, once the plan exists.
 
-`forseti` (`skills/forseti/SKILL.md`, if available in this repo) reviews
+The `forseti` skill, if installed alongside this one, reviews
 against this same hexagon and reports findings — first the plan itself, and
 later the code written from it. The two skills are meant to be used in
 sequence, plan then judge, not as alternatives to each other.

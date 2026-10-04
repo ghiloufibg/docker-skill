@@ -80,17 +80,22 @@ answered, accepted by default, or deferred, and in which round.
 
 ## Stop and resume
 
-- **Stop**: produce the partial plan — sections 1–4 only (requirements
-  understanding, requirements, Confluence context, clarifications) with
+- **Stop**: produce the partial plan — sections 1–4 plus the Resources
+  appendix (requirements understanding, requirements, Confluence context,
+  clarifications) with
   status `Blocked on questions` — and present it in the console like any
   plan (`plan-presentation.md`). There is no architecture section; it is not
   an implementation plan. Offer to save it, and say that resuming later
   reads the saved file, so an unsaved partial plan loses the recorded
   answers. Save only on confirmation; if the file exists, ask before
   overwriting.
-- **Resume**: when Odin is run again on the same key (or, in raw mode, the
-  same slug or a path the user names) and a saved plan file exists, read its
-  section 4 and reuse the recorded `[U#]` answers. In ticket mode, re-fetch
+- **Resume**: find the saved plan by, in order: a path the user names; the
+  `Plan id` (ticket key or slug) in the headers of the files under the plan
+  folder (`docs/plans/` by default), not just the file name, so renaming the
+  file doesn't break it; then, in raw mode, a plan whose verbatim `[P1]`
+  matches the requirements the user supplies now. If several match, ask
+  which. When found, read its section 4 and reuse the recorded `[U#]`
+  answers. Never ask for answers that are already recorded. In ticket mode, re-fetch
   the ticket; a ticket updated after the plan's recorded timestamp may
   invalidate earlier answers — say so. In raw mode, ask the user to supply
   the requirements again or confirm they are unchanged, and treat any

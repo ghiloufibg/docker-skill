@@ -1,6 +1,6 @@
 ---
 name: forseti
-description: Reviews already-written Java 21 (or earlier LTS) Spring Boot 3.x code against strict Hexagonal Architecture (Ports & Adapters) — the same architecture the mimir skill plans — plus modern Java 21 idioms, Spring Boot 3.x practices, and test quality. Produces a severity-ranked findings report (Critical/Important/Recommended) covering: hexagonal boundary violations (domain framework leakage, dependency direction, port ownership, adapter model leakage); Optional misuse (field/parameter vs. return-type); hand-rolled null/blank/empty checks that should use StringUtils/CollectionUtils instead; hardcoded string/number literals that should be named constants; missing final on immutable fields/locals and missed var opportunities; imperative for-loops that should be Streams (and vice versa, where a loop is clearer); manual object mapping that should use MapStruct; large/telescoping constructors that should use a builder; Lombok POJOs that should be records; Spring Boot 3.x practices (constructor injection only, ProblemDetail/RFC7807 error handling, @Transactional correctness incl. self-invocation, JPA N+1/FetchType.LAZY, @ConfigurationProperties over scattered @Value, virtual-thread pinning); test-quality anti-patterns (mocking value objects/records instead of constructing them for real, mocking static methods instead of invoking pure statics directly, mocking collaborators that aren't genuine external boundaries, missing Object Mother/Test Data Builder usage for fixtures, over-verification via mock interactions instead of real assertions, wrong test type for the layer under test — e.g. @SpringBootTest on a domain test or H2 instead of Testcontainers); intent-revealing business-language naming for classes, methods, variables and tests (the DDD ubiquitous language); and a strict zero-comments/zero-Javadoc policy, including flagging AI-generated Given/When/Then-style comments in tests. Also reviews a design or implementation plan for such code (for example a mimir plan) before any code exists, applying the same boundary, idiom, Spring Boot and test-strategy rules to the planned classes, ports, adapters and testing section. Use whenever the user asks to review, audit, critique, or find issues in already-written Java/Spring Boot code or its tests, or in a design/implementation plan for a Java service, asks "does this follow hexagonal architecture", wants a PR review for a Java service, or asks to check code, tests or a plan against modern Java 21/Spring Boot 3 best practices. Do NOT use to produce a plan from scratch — use the mimir skill to plan first, then forseti to judge the plan — and do NOT use for non-Java stacks or for pure build/config file review with no Java source involved.
+description: Reviews Java 21 (or earlier LTS) Spring Boot 3.x code, or a design or implementation plan for it such as a mimir plan, against strict Hexagonal Architecture and reports severity-ranked findings (Critical, Important, Recommended). Covers boundary violations (domain framework leakage, dependency direction, port ownership, adapter model leakage), intent-revealing business-language naming, Java 21 idioms (Optional misuse, records over Lombok, MapStruct, builders, StringUtils and CollectionUtils, constants), Spring Boot 3.x practices (constructor injection, ProblemDetail, @Transactional, JPA N+1, @ConfigurationProperties), test-quality anti-patterns (over-mocking, wrong test type per layer) and a zero-comments policy. Use when asked to review, audit or critique Java or Spring Boot code, tests or a plan, to check hexagonal architecture, or to review a PR for a Java service. Do NOT use to produce a plan (use mimir), for non-Java stacks, or for build or config files with no Java source.
 ---
 
 # Forseti — the Fair Verdict
@@ -19,15 +19,14 @@ design (the plan) and, later, the code written from it, against the same
 hexagon and a set of Java 21 / Spring Boot 3.x idiom rules. It runs in one
 of two modes, chosen by what it is handed: **code mode** (source files, a
 diff, a PR) or **plan mode** (a design or implementation plan document —
-see "Reviewing a plan instead of code" below). Read `skills/mimir/references/hexagonal-architecture.md`
-and `skills/mimir/references/java21-standards.md` first if they're available in
-this repo — this skill's boundary checklist restates their rules as review
+see "Reviewing a plan instead of code" below). If the mimir skill is installed alongside this one, read its
+`references/hexagonal-architecture.md` and `references/java21-standards.md`
+first — this skill's boundary checklist restates their rules as review
 checks rather than re-deriving them, so the two skills stay consistent with
 each other.
 
 This is a **review skill, not an auto-fix skill**. It reports findings with
-enough detail (file:line, rule, why, corrected snippet) that a developer or
-`/sc:implement` can act on them — it does not rewrite the code itself unless
+enough detail (file:line, rule, why, corrected snippet) that a developer or a coding agent can act on them — it does not rewrite the code itself unless
 the user explicitly asks for the fix to be applied.
 
 ## Reviewing a plan instead of code
@@ -171,8 +170,10 @@ shows the corrected version — a finding that says "use a constant here"
 without showing the constant isn't finished.
 
 For a review covering many files, save the report to
-`claudedocs/review-<feature-or-scope>-<yyyy-mm-dd>.md` instead of only
-pasting it into chat, per this project's file-organization convention. For
+`.copilot/review-<feature-or-scope>-<yyyy-mm-dd>.md` instead of only
+pasting it into chat. **Exception**: when a calling skill (for example
+`odin`) asks for findings inline, return them inline and write no file — the
+caller owns what gets written. For
 a single small file or a short diff, replying inline is fine — don't create
 a file for three findings.
 

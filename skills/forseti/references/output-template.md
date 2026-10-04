@@ -82,8 +82,9 @@ same with these substitutions:
 - The quoted block is the plan's own text (a planned signature, a package
   tree line, a sentence from the testing section), not Java source.
 - **Fix** is the corrected plan text or signature, not a code change.
-- Name the saved file `claudedocs/review-plan-<feature>-<yyyy-mm-dd>.md`
-  when the review is long enough to save.
+- Name the saved file `.copilot/review-plan-<feature>-<yyyy-mm-dd>.md`
+  when the review is long enough to save, unless a calling skill asked for
+  findings inline (then write no file).
 
 ## Ordering rules
 
@@ -105,5 +106,5 @@ same with these substitutions:
 A single small file with two or three findings doesn't need the full
 `## Summary` counts table or a `## What's already good` section — a short
 inline reply with the findings grouped by severity is enough. Reserve the
-full template, and saving it to `claudedocs/`, for a review spanning
+full template, and saving it to `.copilot/`, for a review spanning
 several files or a whole PR, per `SKILL.md` step 7.
