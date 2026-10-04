@@ -99,9 +99,20 @@ no connection to the Docker Ops/MCP-UI work above; it lives here purely for
 publishing convenience.
 
 [`skills/forseti/`](skills/forseti/SKILL.md) is `mimir`'s companion: given
-already-written Java 21 / Spring Boot 3.x code built on that same
-Hexagonal Architecture, it reviews it and produces a severity-ranked
-findings report — boundary violations, modern Java/Spring idiom gaps, test
-quality anti-patterns, and a strict zero-comments/zero-Javadoc policy.
-Where `mimir` plans before code exists, `forseti` judges it after. Also
-unrelated to the Docker Ops/MCP-UI work above.
+Java 21 / Spring Boot 3.x code, or a design/implementation plan, built on
+that same Hexagonal Architecture, it reviews it and produces a
+severity-ranked findings report — boundary violations, modern Java/Spring
+idiom gaps, intent-revealing business-language naming, test quality
+anti-patterns, and a strict zero-comments/zero-Javadoc policy. `mimir`
+plans before code exists, and `forseti` judges the plan and, later, the
+code. Also unrelated to the Docker Ops/MCP-UI work above.
+
+[`skills/odin/`](skills/odin/SKILL.md) turns a Jira ticket into an
+implementation plan by orchestrating the other two: it reads the ticket
+and the related Confluence pages, builds a requirements register, asks you
+every question still open before any design starts, then has `mimir`
+architect the solution and `forseti` review the plan. The plan is shown in
+the console for you to review and change, and is saved as markdown (with a
+resources appendix listing every source it used) only when you confirm. It
+needs a jira skill and a confluence skill in the session, and, like the
+other two, is unrelated to the Docker Ops/MCP-UI work above.
