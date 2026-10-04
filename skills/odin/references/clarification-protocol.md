@@ -5,7 +5,7 @@ first reading pass (steps 1–5) and before `mimir` is invoked.
 
 ## What counts as open
 
-A question is **open** if the ticket, the Confluence cards and the code
+A question is **open** if the requirements source, the Confluence cards and the code
 could not answer it. Questions answered from a source are resolved, with
 their citation, and are not asked.
 
@@ -28,7 +28,7 @@ If nothing is open, say so in one line and continue.
 Otherwise present everything in **one batch**, blocking first:
 
 ```
-Before I design this, <N> questions are still open after reading <ticket>,
+Before I design this, <N> questions are still open after reading <source>,
 <n> Confluence pages and <module>.
 
 BLOCKING
@@ -56,8 +56,12 @@ Per question: answer it, accept the default, or defer it. Globally:
   the affected design will be contingent and flagged as such in the plan.
 - **Deferring a non-blocking question** needs no warning; it is recorded as
   an open item.
-- **A stakeholder is needed**: offer to draft Jira comment text for the user
-  to post. Never post it. Then the user normally chooses `stop`.
+- **A stakeholder is needed**: offer to draft the question as text for the
+  user to send (a Jira comment in ticket mode, a message in raw mode). Never
+  post or send it. Then the user normally chooses `stop`.
+- **Raw mode: criteria confirmation.** Where requirements have no written
+  acceptance criteria, ask them as one grouped, non-blocking question: the
+  proposed criterion per requirement, with `defaults` meaning "accept all".
 
 ## Rounds
 
@@ -76,7 +80,7 @@ answered, accepted by default, or deferred, and in which round.
 
 ## Stop and resume
 
-- **Stop**: produce the partial plan — sections 1–4 only (ticket
+- **Stop**: produce the partial plan — sections 1–4 only (requirements
   understanding, requirements, Confluence context, clarifications) with
   status `Blocked on questions` — and present it in the console like any
   plan (`plan-presentation.md`). There is no architecture section; it is not
@@ -84,11 +88,14 @@ answered, accepted by default, or deferred, and in which round.
   reads the saved file, so an unsaved partial plan loses the recorded
   answers. Save only on confirmation; if the file exists, ask before
   overwriting.
-- **Resume**: when Odin is run again on the same key and a saved plan file
-  with that key exists, read its section 4, reuse the recorded `[U#]` answers,
-  re-fetch the ticket, and ask only about what is still open or has changed
-  (a ticket updated after the plan's recorded timestamp may invalidate
-  earlier answers — say so).
+- **Resume**: when Odin is run again on the same key (or, in raw mode, the
+  same slug or a path the user names) and a saved plan file exists, read its
+  section 4 and reuse the recorded `[U#]` answers. In ticket mode, re-fetch
+  the ticket; a ticket updated after the plan's recorded timestamp may
+  invalidate earlier answers — say so. In raw mode, ask the user to supply
+  the requirements again or confirm they are unchanged, and treat any
+  difference from the verbatim `[P1]` in section 2 as a change. Then ask
+  only about what is still open or has changed.
 
 ## Non-interactive runs
 

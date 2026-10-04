@@ -3,19 +3,25 @@
 `SKILL.md` step 9 says to use this structure. The document below is shown
 to the user in full before anything is saved (`plan-presentation.md`); what
 they approve is exactly what is written to the file. Fill every section with the
-ticket's real content; a section that only repeats generic advice means the
-plan isn't finished. Cite sources inline with `[J#] [C#] [F#] [U#] [A#]`.
+requirements' real content; a section that only repeats generic advice means
+the plan isn't finished. Cite sources inline with
+`[J#] [P#] [C#] [F#] [U#] [A#]`.
 
 ```markdown
 # <KEY>: <title> — Technical Implementation Plan
+(raw mode has no key: `# <title> — Technical Implementation Plan`)
 
 Status: <Ready | Draft (assumptions accepted) | Contingent | Blocked on questions>
-Generated: <date> · Ticket last updated: <timestamp> · Skills: odin, mimir, forseti
+Source: <Jira <KEY>, last updated <timestamp> | requirements provided in the prompt>
+Generated: <date> · Skills: odin, mimir, forseti
 
-## 1. Ticket Understanding
-Goal in one paragraph. Scope in / scope out. Actors. [J#]
+## 1. Requirements Understanding
+Goal in one paragraph. Scope in / scope out. Actors. [J#] or [P#]
 
 ## 2. Requirements Register
+In raw mode, first quote the prompt text verbatim as [P1] (there is no
+ticket to open). Then:
+
 | ID | Type | Requirement | Source | Testable |
 |----|------|-------------|--------|----------|
 
@@ -26,7 +32,7 @@ If nothing relevant was found, say so.
 ## 4. Clarifications
 - **Gate outcome**: <N> asked in round <r>: <a> answered, <b> default accepted,
   <c> deferred.
-- **Resolved**: question → answer, with citation [U#]/[J#]/[C#]/[F#].
+- **Resolved**: question → answer, with citation [U#]/[J#]/[P#]/[C#]/[F#].
 - **Assumptions**: A1… each with the default chosen and the risk if wrong,
   marked "raised during design" where applicable.
 - **Open**: deferred questions; blocking ones name the design parts that
@@ -56,7 +62,7 @@ Small enough to implement and review on its own.
 ## 9. Risks, Dependencies, Rollout
 Risks with the mitigation; external dependencies and who owns them;
 migrations, feature flags, Kubernetes or native-image impact where the
-design touches them. Omit a subsection the ticket doesn't touch.
+design touches them. Omit a subsection the requirements don't touch.
 
 ## 10. Resources
 (see references/resources-appendix.md)
@@ -64,7 +70,7 @@ design touches them. Omit a subsection the ticket doesn't touch.
 
 ## Sizing
 
-Match the plan to the ticket. A one-use-case ticket gets short sections 5–9;
+Match the plan to the requirements. A one-use-case plan gets short sections 5–9;
 inflating them with invented detail is worse than a short honest plan.
 Section 10 is never shortened.
 

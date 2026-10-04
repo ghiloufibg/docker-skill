@@ -10,6 +10,7 @@ at and not used.
 | Marker | Source |
 |---|---|
 | `[J#]` | Jira issue (the ticket and linked issues) |
+| `[P#]` | Requirements text the user provided in the prompt |
 | `[C#]` | Confluence page |
 | `[F#]` | Repository file read |
 | `[U#]` | User answer or decision at the gate |
@@ -24,7 +25,14 @@ be cited at least once or moved to "Considered, not used".
 ```markdown
 ## 10. Resources
 
+### Prompt
+(raw mode, or extra requirements given alongside a ticket)
+| ID | Provided | Reproduced in |
+|----|----------|---------------|
+| P1 | <date> | Plan section 2, verbatim |
+
 ### Jira
+(omit in raw mode unless the text referenced a Jira issue)
 | ID | Key | Title | Type / status | Last updated | Link |
 |----|-----|-------|---------------|--------------|------|
 | J1 | PROJ-123 | ... | Story / In Progress | <ts> | <url> |
@@ -59,7 +67,8 @@ Pages or issues found and rejected, each with the reason; queries that
 returned nothing; pages left unread because of the budget.
 
 ### Generation
-Date, ticket timestamp at generation, gate rounds run, status.
+Date, requirements source (Jira key with its timestamp at generation, or
+"prompt"), gate rounds run, status.
 ```
 
 ## Rules

@@ -5,11 +5,14 @@ not every page that mentions the topic.
 
 ## Tiers
 
-1. **Explicit links**: pages linked from the ticket, its comments, its
-   parent epic, and the linked issues followed in step 1.
+1. **Explicit links**: pages linked from the requirements source — the
+   ticket, its comments, its parent epic and the linked issues followed in
+   step 1, or the links in the prompt text.
 2. **Targeted search**: only if tier 1 leaves gaps. Search on the
    component names, the epic name, the domain nouns in the requirements, and
-   the ticket key. Several narrow queries beat one broad one.
+   the ticket key (if any). Several narrow queries beat one broad one. In
+   raw mode, run this tier only if the requirements name a document, system
+   or page, or the user asks for it.
 3. **One-hop follow**: from a page already read, follow a link only if it
    points to an ADR, an API spec, or a standards page.
 
@@ -38,7 +41,7 @@ same ground, and say which was preferred and why.
 
 ```
 [C1] <page title> — <space>, page id <id>, version <n>, modified <date>
-Found via: <link from [J1] | search "<query>">
+Found via: <link from [J1] or [P1] | search "<query>">
 Facts: <the facts that matter, short>
 Touches: R2, R5
 Staleness: <ok | older than 12 months | unknown>
@@ -50,7 +53,7 @@ doubt ("confirm this is still current").
 
 ## Conflicts
 
-When a page contradicts the ticket, or two pages contradict each other, do
+When a page contradicts the requirements, or two pages contradict each other, do
 not choose silently. Record both claims with their citations as a doubt;
 the gate puts it to the user with a recommended default.
 

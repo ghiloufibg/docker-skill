@@ -8,8 +8,9 @@ explicitly confirms. What the user reviews is exactly what gets saved.
 
 Three blocks, in this order. Only the second block is saved.
 
-1. **Review header** (not saved): one compact block with the ticket, the
-   status, the path the plan would be saved to, and the counts that tell the
+1. **Review header** (not saved): one compact block with the source (the
+   ticket, or the plan title and slug in raw mode, which the user can
+   rename), the status, the path the plan would be saved to, and the counts that tell the
    user what they are about to read: requirements, implementation slices,
    assumptions, design-review findings (fixed / accepted / open), open
    questions.
@@ -24,6 +25,7 @@ Three blocks, in this order. Only the second block is saved.
 ```
 Review options
   save            write to docs/plans/PROJ-123-order-cancellation.md
+                  (raw mode: docs/plans/order-cancellation.md)
   change <what>   e.g. change 5: split CancelOrder into two use cases
   path <p>        save somewhere else
   show <section>  reprint one section
@@ -64,7 +66,7 @@ satisfies it, then keep the document consistent:
   good", "ok") is not one — ask once: "Save to <path>?". Never infer
   confirmation, and never save partway through review.
 - Before writing, state the path and the revision being saved. If the file
-  already exists, show its status and ticket timestamp and ask whether to
+  already exists, show its status and source (with the ticket timestamp, in ticket mode) and ask whether to
   overwrite or use another name. Create the target directory if it is
   missing.
 - Write exactly the approved plan body — not the review header, not the
