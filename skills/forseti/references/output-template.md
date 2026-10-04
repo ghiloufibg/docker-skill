@@ -70,6 +70,21 @@ plainly instead of omitting the sections above. Don't manufacture a
 Recommended finding just to have something to report.>
 ```
 
+## Plan-mode variant
+
+When reviewing a plan (`references/plan-review.md`), the structure is the
+same with these substitutions:
+
+- Title: `# Plan Review: <plan name>`, and the Summary says "N planned
+  classes/ports reviewed" instead of a file count.
+- **Location**: the plan's section heading and the item name, e.g.
+  `Plan §6 Adapters — OrderJpaAdapter`, instead of `<file>:<line>`.
+- The quoted block is the plan's own text (a planned signature, a package
+  tree line, a sentence from the testing section), not Java source.
+- **Fix** is the corrected plan text or signature, not a code change.
+- Name the saved file `claudedocs/review-plan-<feature>-<yyyy-mm-dd>.md`
+  when the review is long enough to save.
+
 ## Ordering rules
 
 - Sections appear in severity order (Critical → Important → Recommended),

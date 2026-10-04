@@ -1,6 +1,6 @@
 ---
 name: forseti
-description: Reviews already-written Java 21 (or earlier LTS) Spring Boot 3.x code against strict Hexagonal Architecture (Ports & Adapters) — the same architecture the mimir skill plans — plus modern Java 21 idioms, Spring Boot 3.x practices, and test quality. Produces a severity-ranked findings report (Critical/Important/Recommended) covering: hexagonal boundary violations (domain framework leakage, dependency direction, port ownership, adapter model leakage); Optional misuse (field/parameter vs. return-type); hand-rolled null/blank/empty checks that should use StringUtils/CollectionUtils instead; hardcoded string/number literals that should be named constants; missing final on immutable fields/locals and missed var opportunities; imperative for-loops that should be Streams (and vice versa, where a loop is clearer); manual object mapping that should use MapStruct; large/telescoping constructors that should use a builder; Lombok POJOs that should be records; Spring Boot 3.x practices (constructor injection only, ProblemDetail/RFC7807 error handling, @Transactional correctness incl. self-invocation, JPA N+1/FetchType.LAZY, @ConfigurationProperties over scattered @Value, virtual-thread pinning); test-quality anti-patterns (mocking value objects/records instead of constructing them for real, mocking static methods instead of invoking pure statics directly, mocking collaborators that aren't genuine external boundaries, missing Object Mother/Test Data Builder usage for fixtures, over-verification via mock interactions instead of real assertions, wrong test type for the layer under test — e.g. @SpringBootTest on a domain test or H2 instead of Testcontainers); and a strict zero-comments/zero-Javadoc policy, including flagging AI-generated Given/When/Then-style comments in tests. Use whenever the user asks to review, audit, critique, or find issues in already-written Java/Spring Boot code or its tests, asks "does this follow hexagonal architecture", wants a PR review for a Java service, or asks to check code or tests against modern Java 21/Spring Boot 3 best practices. Do NOT use before code exists — use the mimir skill to plan first — and do NOT use for non-Java stacks or for pure build/config file review with no Java source involved.
+description: Reviews already-written Java 21 (or earlier LTS) Spring Boot 3.x code against strict Hexagonal Architecture (Ports & Adapters) — the same architecture the mimir skill plans — plus modern Java 21 idioms, Spring Boot 3.x practices, and test quality. Produces a severity-ranked findings report (Critical/Important/Recommended) covering: hexagonal boundary violations (domain framework leakage, dependency direction, port ownership, adapter model leakage); Optional misuse (field/parameter vs. return-type); hand-rolled null/blank/empty checks that should use StringUtils/CollectionUtils instead; hardcoded string/number literals that should be named constants; missing final on immutable fields/locals and missed var opportunities; imperative for-loops that should be Streams (and vice versa, where a loop is clearer); manual object mapping that should use MapStruct; large/telescoping constructors that should use a builder; Lombok POJOs that should be records; Spring Boot 3.x practices (constructor injection only, ProblemDetail/RFC7807 error handling, @Transactional correctness incl. self-invocation, JPA N+1/FetchType.LAZY, @ConfigurationProperties over scattered @Value, virtual-thread pinning); test-quality anti-patterns (mocking value objects/records instead of constructing them for real, mocking static methods instead of invoking pure statics directly, mocking collaborators that aren't genuine external boundaries, missing Object Mother/Test Data Builder usage for fixtures, over-verification via mock interactions instead of real assertions, wrong test type for the layer under test — e.g. @SpringBootTest on a domain test or H2 instead of Testcontainers); intent-revealing business-language naming for classes, methods, variables and tests (the DDD ubiquitous language); and a strict zero-comments/zero-Javadoc policy, including flagging AI-generated Given/When/Then-style comments in tests. Also reviews a design or implementation plan for such code (for example a mimir plan) before any code exists, applying the same boundary, idiom, Spring Boot and test-strategy rules to the planned classes, ports, adapters and testing section. Use whenever the user asks to review, audit, critique, or find issues in already-written Java/Spring Boot code or its tests, or in a design/implementation plan for a Java service, asks "does this follow hexagonal architecture", wants a PR review for a Java service, or asks to check code, tests or a plan against modern Java 21/Spring Boot 3 best practices. Do NOT use to produce a plan from scratch — use the mimir skill to plan first, then forseti to judge the plan — and do NOT use for non-Java stacks or for pure build/config file review with no Java source involved.
 ---
 
 # Forseti — the Fair Verdict
@@ -14,9 +14,12 @@ framework annotation that crossed into the domain, a JPA entity that
 crossed out through a port, a hardcoded literal that should have been a
 constant — each finding argued from the code itself, not from taste.
 
-Where `mimir` designs the hexagon before code exists, `forseti` judges code
-against that same hexagon (and a set of Java 21 / Spring Boot 3.x idiom
-rules) after it exists. Read `skills/mimir/references/hexagonal-architecture.md`
+Where `mimir` designs the hexagon before code exists, `forseti` judges that
+design (the plan) and, later, the code written from it, against the same
+hexagon and a set of Java 21 / Spring Boot 3.x idiom rules. It runs in one
+of two modes, chosen by what it is handed: **code mode** (source files, a
+diff, a PR) or **plan mode** (a design or implementation plan document —
+see "Reviewing a plan instead of code" below). Read `skills/mimir/references/hexagonal-architecture.md`
 and `skills/mimir/references/java21-standards.md` first if they're available in
 this repo — this skill's boundary checklist restates their rules as review
 checks rather than re-deriving them, so the two skills stay consistent with
@@ -26,6 +29,17 @@ This is a **review skill, not an auto-fix skill**. It reports findings with
 enough detail (file:line, rule, why, corrected snippet) that a developer or
 `/sc:implement` can act on them — it does not rewrite the code itself unless
 the user explicitly asks for the fix to be applied.
+
+## Reviewing a plan instead of code
+
+When the input is a design or implementation plan rather than source code,
+follow `references/plan-review.md` instead of steps 1–6 below as written: it
+states which checks carry over to planned signatures and package layouts,
+which don't apply to a document, and the plan-specific completeness checks.
+The severity scale, the Docker/CI reality check, and the report structure
+(with the plan-mode variant in `references/output-template.md`) are the
+same. A plan review reports findings and does not rewrite the plan unless
+the user asks.
 
 ## The severity scale
 
@@ -41,7 +55,9 @@ finding unranked, and never use a fourth tier:
   misbehave at runtime today: `Optional` used as a field/parameter,
   hand-rolled null/blank checks instead of `StringUtils`/`CollectionUtils`,
   a magic literal that should be a constant, manual mapping that should be
-  MapStruct, a Lombok data POJO that should be a record, a comment or
+  MapStruct, a Lombok data POJO that should be a record, a name that hides
+  business intent where a domain term exists (`OrderManager`, `processData`,
+  `OrderDto` in `domain`), a comment or
   Javadoc block present anywhere in the reviewed code, missing `final` on
   something that's never reassigned.
 - **RECOMMENDED** — a judgment call, not a rule violation: a borderline
@@ -95,9 +111,12 @@ restates mimir's six non-negotiable rules as concrete review checks:
 domain purity, dependency direction, port ownership, inbound port
 granularity, adapter-model leakage, and the Java-version ceiling.
 
-### 3. Walk the Java 21 idiom checklist
+### 3. Walk the Java 21 idiom and naming checklists
 
-Follow `references/java21-modern-idioms.md` for: `Optional` placement,
+Follow `references/naming-checklist.md` first: names in `domain` and
+`application` must carry business intent in the ubiquitous language, and
+every naming finding must cite the better term and where it comes from.
+Then follow `references/java21-modern-idioms.md` for: `Optional` placement,
 `StringUtils`/`CollectionUtils` vs. hand-rolled checks, constants vs. magic
 literals, `final`/`var`, Stream vs. imperative loops, records vs. Lombok,
 builder vs. large constructors, and MapStruct vs. manual mapping. Each
