@@ -1,6 +1,6 @@
 ---
 name: mimir
-description: Turns a feature or requirement description into a detailed, ready-to-implement plan for a Java backend (Java 21 LTS or earlier — never newer) built with strict Hexagonal Architecture (Ports & Adapters). Produces the domain model (records, sealed types, value objects), inbound/outbound port interfaces, use-case/application services, adapter skeletons, package layout, dependency-boundary rules, and a layer-by-layer testing strategy — not full production code. Use this whenever the user asks to design, architect, or plan a Java feature, service, or module; mentions hexagonal architecture, ports and adapters, clean/onion architecture, DDD, bounded contexts, aggregates; or asks how to structure a Java backend before writing code — even without saying "hexagonal" explicitly, e.g. "how should I structure this Java service", "give me an implementation plan for order cancellation", "design the module for X". Do NOT use for non-Java stacks, for reviewing or refactoring already-written code, or when the user wants hand-written method bodies rather than a plan.
+description: Turns a feature or requirement description into a detailed, ready-to-implement plan for a Java backend (Java 21 LTS or earlier — never newer) built with strict Hexagonal Architecture (Ports & Adapters). Produces the domain model (records, sealed types, value objects), inbound/outbound port interfaces, use-case/application services, adapter skeletons, package layout, dependency-boundary rules, and a layer-by-layer testing strategy — not full production code. Use this whenever the user asks to design, architect, or plan a Java feature, service, or module; mentions hexagonal architecture, ports and adapters, clean/onion architecture, DDD, bounded contexts, aggregates; or asks how to structure a Java backend before writing code — even without saying "hexagonal" explicitly, e.g. "how should I structure this Java service", "give me an implementation plan for order cancellation", "design the module for X". If the input is a Jira ticket and the odin skill is available, use odin instead — it gathers the requirements and calls this skill. Do NOT use for non-Java stacks, for reviewing or refactoring already-written code, or when the user wants hand-written method bodies rather than a plan.
 ---
 
 # Mimir — the Hexagonal Java Architect
@@ -12,10 +12,10 @@ written — domain model, ports, use cases, adapters, package layout, and how
 each layer will be tested. It does not write the business logic itself; that
 is a job for `/sc:implement` or the developer, once the plan exists.
 
-Once that code is written, `forseti` (`skills/forseti/SKILL.md`, if
-available in this repo) reviews it against this same hexagon and reports
-findings — the two skills are meant to be used in sequence, plan then
-judge, not as alternatives to each other.
+`forseti` (`skills/forseti/SKILL.md`, if available in this repo) reviews
+against this same hexagon and reports findings — first the plan itself, and
+later the code written from it. The two skills are meant to be used in
+sequence, plan then judge, not as alternatives to each other.
 
 The constraint that makes the plan trustworthy: **strict Hexagonal
 Architecture, and Java no newer than 21 (LTS)**. Every design decision below
@@ -59,6 +59,37 @@ framework-coupled domain a year later — so treat them as boundaries to design
    concurrency, JEP 453) may be mentioned as an explicitly opt-in future
    note, never as part of the default plan — see `references/java21-standards.md`.
 
+## Naming: the ubiquitous language
+
+A plan's names are its documentation, and the code written from it has no
+comments to fall back on, so every name has to carry business intent. This
+is how the domain stays readable to the people who asked for the feature
+(the DDD "ubiquitous language").
+
+1. **Use the business's own words.** Every class, record, port, method,
+   field, parameter and test name takes its vocabulary from the requirement
+   (and from the ticket or documents it came from), not from an invented
+   technical synonym. If the business says "settlement", the type is
+   `Settlement`, not `PaymentRecord`.
+2. **Name by intent, not mechanism.** Behaviour is a business verb
+   (`cancel`, `approve`, `reserveStock`), not `update`/`set`/`process`/
+   `handle`; concepts are nouns the business uses; booleans read as facts
+   (`isEligibleForRefund`). Use cases are already named this way (`CancelOrder`,
+   not `UpdateOrder`); methods and fields follow the same standard.
+3. **One concept, one name.** Pick one term per concept and use it in every
+   layer. Don't alternate `Customer`/`Client`/`User` for the same thing.
+4. **Technical names stay in adapters.** `Entity`, `Dto`, `Impl`, `Manager`,
+   `Helper`, `Util`, `Data`, `Info` and table- or column-derived names belong
+   only at the adapter edge (`OrderJpaEntity` maps to `Order`), never in
+   `domain` or `application`.
+5. **Conflicting vocabulary is a question, not a choice.** If the
+   requirement uses two words for one thing, or one word for two things,
+   record it as an Assumption (or a question, if no clarification has been
+   done) rather than silently picking one.
+
+Close the domain model section of the plan with a short glossary (see
+`references/output-template.md`).
+
 ## Workflow
 
 ### 1. Extract the domain, don't just restate the requirement
@@ -73,12 +104,18 @@ Read the feature/requirement and identify, before designing anything:
 - The **external dependencies** the feature needs — a database, another
   service, a queue, the clock, a random/ID generator. Every one of these
   becomes an outbound port; none of them get referenced directly.
+- The **ubiquitous language** — the business terms the requirement uses for
+  each aggregate, use case, value and state, so the names in the plan come
+  from the requirement and not from the implementer's habits.
 
 If the requirement is genuinely too ambiguous to model (e.g. it's unclear
 whether "cancel" is a state transition or a deletion), ask one targeted
 question rather than guessing — but don't turn this into a full requirements
 interview. A architecture plan can carry explicit **Assumptions** for minor
 gaps; save questions for the ones that would change the shape of the domain.
+
+If the caller says clarification is already complete, don't ask at all:
+record any new doubt as an **Assumption** in the plan instead.
 
 ### 2. Model the domain
 
@@ -129,11 +166,13 @@ nobody can safely change.
 ### 7. Specify the testing strategy
 
 Every plan states, per layer: what's tested, with what tool, and — critically
-— **the one ArchUnit-style rule that would have caught it if this plan's
-boundary was violated**. See `references/hexagonal-architecture.md` for the
+— **the one build-enforced rule that would have caught it if this plan's
+boundary was violated** (a module-dependency or import-control rule the
+build fails on). See `references/hexagonal-architecture.md` for the
 default toolset (plain JUnit 5 for the domain, fakes-over-mocks for
-use-case tests, Testcontainers/WireMock for adapter integration tests,
-ArchUnit for the dependency rule itself).
+use-case tests, an in-process database substitute for persistence adapter
+tests, WireMock for client adapter tests, and a build-enforced
+dependency/import rule for the boundary itself).
 
 ### 8. Write the plan
 
@@ -151,3 +190,7 @@ not an annotation), an outbound port named after a table instead of a
 domain need, or a use case that calls two unrelated outbound ports because
 it's secretly two use cases. Catching these before handing over the plan is
 the entire value of doing this step before code exists.
+
+Then read every name in the plan once more: does it say what the business
+calls this thing and what it is for? A name like `OrderManager`,
+`processData`, or `OrderDto` inside `domain` fails that test.

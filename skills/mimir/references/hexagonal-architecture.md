@@ -67,41 +67,32 @@ actually calls. Prefer one narrow port per actual need (`FindOrderById`,
 |---|---|---|---|
 | `domain` | Invariants, value object validation, domain services, event/error construction | Plain JUnit 5, no mocks, no Spring context | Runs in milliseconds; a domain test that needs a mock has a domain that needs an outbound port instead |
 | `application`/`usecase` | Orchestration: which outbound ports get called, in what order, with what data, on success and on each failure branch | JUnit 5 + hand-written in-memory fakes of outbound ports (preferred over mocking frameworks when the port is simple — a `Map`-backed `FakeOrderRepository` catches more real bugs than a Mockito stub because it behaves like real state) | Every branch of the use case's sealed result type has at least one test |
-| `adapter/out` (persistence) | The adapter's mapping and query correctness against a real engine | Testcontainers running the real database (not H2-in-memory — engine-specific SQL/constraint behavior diverges) | Adapter tests never touch domain invariants; they test mapping + persistence mechanics only |
+| `adapter/out` (persistence) | The adapter's mapping and query correctness against a real engine | An in-process database substitute (H2 or equivalent), with the divergence from the production engine stated as an Assumption (see below) | Adapter tests never touch domain invariants; they test mapping + persistence mechanics only |
 | `adapter/out` (client) | Request/response mapping, error translation, timeout/retry behavior | WireMock or MockWebServer stubbing the real wire protocol | Assert on what's actually sent over the wire, not just on the mapper function in isolation |
 | `adapter/in` (web) | Request validation, status codes, response shape, error mapping | Slice test (e.g. `@WebMvcTest` if using Spring) with the use-case port mocked | Only tests the adapter's own responsibility — HTTP concerns — not the use case's logic |
-| Boundary itself | The dependency rule from the non-negotiable rules list | ArchUnit rule, one per boundary: `classes().that().resideInAPackage("..domain..").should().onlyDependOnClassesThat().resideOutsideOfPackage("..adapter..")` (and a matching rule forbidding `javax.persistence`/`jakarta.persistence`/`org.springframework` imports inside `..domain..`) | This is the test that makes the other five actually enforceable over time — without it, "the domain has zero framework dependencies" is a convention that erodes silently |
+| Boundary itself | The dependency rule from the non-negotiable rules list | A build-enforced rule, one per boundary: nothing in `..domain..` or `..application..` may depend on `..adapter..`, and `javax.persistence`/`jakarta.persistence`/`org.springframework` imports are forbidden inside `..domain..`. Enforce it with whatever the build already fails on — separate modules whose poms give `domain` no framework dependencies, or the build's import-control/linter configuration | This is the test that makes the other five actually enforceable over time — without it, "the domain has zero framework dependencies" is a convention that erodes silently |
 
-Always include the ArchUnit rule (or the equivalent for the project's
-language/tooling) in the plan's testing section — it's the one test that
+Always include the boundary rule in the plan's testing section, in
+whatever form the project's build can enforce — it's the one check that
 turns the six non-negotiable rules from a one-time design decision into
-something the codebase keeps automatically.
+something the codebase keeps automatically. Name the concrete mechanism
+(which module's pom, or which import-control rule) rather than leaving it
+as "enforce the boundary".
 
-**Before recommending Testcontainers for the `adapter/out` (persistence) row,
-confirm the project's CI can actually run Docker** — check the CI config
-(`.github/workflows/*.yml`, `.gitlab-ci.yml`, `Jenkinsfile`,
-`azure-pipelines.yml`, `bitbucket-pipelines.yml`) for a Docker-in-Docker or
-`services: docker` setup, or ask the user directly if it's unclear. Never
-assume Docker is available. If it isn't, don't plan Testcontainers into the
-persistence adapter tests — that produces a plan whose tests can't run where
-they need to. Instead:
-- Default to an in-memory substitute (H2 or equivalent) for the adapter
-  tests, and state the known divergence from the production engine
-  (dialect-specific SQL, constraint/locking behavior) as an explicit
-  **Assumption** in the plan's assumptions section (see
-  `output-template.md` section 2) — a named, accepted trade-off, not a
-  silently lowered bar.
+**Persistence adapter tests run against an in-process substitute** (H2 or
+equivalent), so they need no container runtime. State the known divergence
+from the production engine (dialect-specific SQL, constraint/locking
+behavior) as an explicit **Assumption** in the plan's assumptions section
+(see `output-template.md` section 2) — a named, accepted trade-off, not a
+silently lowered bar.
 - Lean more heavily on the `application`/`usecase` layer's fakes for the
-  mapping and query logic that would otherwise be covered by a
-  real-engine test, since that layer's tests aren't Docker-dependent.
-- If it's useful to the team, plan can note the option of a separate,
-  optional CI lane with Docker access (a manually triggered workflow, a
-  nightly job) for real-engine coverage — phrased as a suggestion for the
-  team to decide on, not a requirement of the plan.
+  mapping and query logic that a real-engine test would otherwise cover.
+- If it's useful to the team, the plan can note real-engine coverage
+  through a database the CI environment already provides — phrased as a
+  suggestion for the team to decide on, not a requirement of the plan.
 
 A test suite that's mostly unit/fake-backed tests with a small
-integration slice is the correct shape for a Docker-less CI, not a gap to
-close.
+integration slice is a sound shape, not a gap to close.
 
 ## Result/error handling across the boundary
 

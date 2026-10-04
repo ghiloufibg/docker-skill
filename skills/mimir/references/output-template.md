@@ -25,6 +25,11 @@ For each aggregate/entity/value object:
 
 For domain events and errors: the sealed interface + its permitted records.
 
+Start the section with a short glossary: each business term from the
+requirement (in the requirement's own words) and the type or method that
+carries it. Terms the requirement uses inconsistently go under Assumptions
+(section 2), not into the glossary.
+
 ## 4. Use Cases & Ports
 
 ### Inbound ports (application.port.in)
@@ -47,8 +52,7 @@ For each inbound port's implementation:
 ## 6. Adapters
 For each port, its adapter(s):
 - Adapter name, technology (e.g. Spring MVC controller, Spring Data JPA
-  repository, Testcontainers-verified Postgres adapter, WireMock-verified
-  REST client).
+  repository, WireMock-verified REST client).
 - The explicit mapper between the adapter's model and the domain record —
   name both sides.
 - Anything adapter-specific worth flagging (validation annotations on the
@@ -61,8 +65,8 @@ The concrete package tree for this feature, following
 explicitly if this plan instead uses layer-first, and why).
 
 ## 8. Testing Strategy
-One line per layer (domain, use case, each adapter, the ArchUnit boundary
-rule), following the table in `references/hexagonal-architecture.md`, made
+One line per layer (domain, use case, each adapter, the build-enforced
+boundary rule), following the table in `references/hexagonal-architecture.md`, made
 specific to this feature's classes and failure modes.
 
 ## 9. Concurrency & Performance Notes
