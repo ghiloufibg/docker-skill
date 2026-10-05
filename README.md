@@ -118,3 +118,17 @@ resources appendix listing every source it used) only when you confirm. A
 jira skill is needed only for tickets and a confluence skill only when
 there are pages to read; like the other two, it is unrelated to the Docker
 Ops/MCP-UI work above.
+
+[`skills/tyr/`](skills/tyr/SKILL.md) functionally tests one microservice from
+the end user's side, from test cases you list. In `isolation` mode it runs the
+service on your machine with every dependency replaced by a seeded local Docker
+container (WireMock for external APIs, plus whatever the service uses: Postgres,
+Kafka, Redis, S3, ...); in `remote` mode it targets the service deployed in dev
+or rec on GCP, reading dependencies from the repo's k8s manifests and SOPS
+secrets. It scans the service, asks every open question, and writes a plan to
+`./.copilot/docs/qa/`. When you `validate` the plan it runs the live checks,
+writes and runs CI-safe JUnit unit tests for paths a live check cannot reach,
+and writes a report with every bug found. It never fixes the service and never
+stages or commits; you decide what to commit. Needs Docker (isolation) or
+`gcloud`, `kubectl` and `sops` (remote). Unrelated to the Docker Ops/MCP-UI work
+above.
