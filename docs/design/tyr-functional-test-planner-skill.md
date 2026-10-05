@@ -1,7 +1,8 @@
 # Design: `tyr` — functional test planner for a microservice in isolation
 
-Status: implemented in `skills/tyr/` (design revision 5). Not yet dry-run
-against a real service. The name follows the
+Status: implemented in `skills/tyr/` (design revision 5, synced with the
+review fixes). Not yet dry-run against a real service. Where this document
+and the skill files differ, the skill files are the source of truth. The name follows the
 Norse naming of `odin`, `mimir` and `forseti`; Tyr is the god who guarantees
 oaths, which is what these tests check about the service. `heimdall` was the
 first choice and is taken.
@@ -104,8 +105,9 @@ reports and stops; it never attempts to log in or change a context.
   namespace, overlay). The skill compares it with `kubectl config
   current-context` and the repo's overlay names. Only `dev` and `rec` class
   environments are accepted. Anything that looks like production (`prod`,
-  `prd`, `live`) or cannot be classified is refused, and the allow-list can
-  only be widened by the user's explicit statement. dev and rec are the
+  `prd`, `live`) is always refused. An environment that cannot be classified is accepted
+  only if the user states explicitly that it is a test environment, and the
+  plan records that statement. dev and rec are the
   team's test environments, so they are pre-approved: the user only names
   which one for the run, with no further confirmation.
 - **Discovery is local.** Dependencies, URLs, config keys and secret names
@@ -127,7 +129,7 @@ reports and stops; it never attempts to log in or change a context.
   one, otherwise `kubectl port-forward` to the Service. No tunnel to a real
   database or broker is planned; asserting on real infrastructure directly
   is an explicit, read-only choice the user makes in the plan.
-- **Test data** carries a run marker (for example a `qa-<run-id>` prefix in
+- **Test data** carries a run marker (the run id, which starts with `qa-`, in
   business identifiers) so the cleanup step and the humans sharing the
   environment can tell it apart. The plan lists the cleanup per case.
 - **Other people.** Rec and dev are shared. The plan states the expected
@@ -303,7 +305,8 @@ Classify every case `LIVE`, `UNIT` or `NOT-TESTABLE` per section 1.3 and tag
 it `isolation-only`, `remote-only` or `both` per section 1.1. Try `LIVE`
 first for every case. In isolation mode `LIVE` cases are the ones that need
 the environment design below (containers, stubs, seeds); `UNIT` cases need
-none of it. The table (case, class, tag, reason) is confirmed at the gate.
+none of it. The table (case, class, tag, reason) is confirmed at the gate, and is shown even when no question is
+open.
 
 ### 4. Scan the service (`service-scan.md`, read-only)
 
@@ -394,7 +397,10 @@ Non-interactive run: print the blocked partial plan, write nothing.
 - One Compose project per run, generated from the plan: dedicated network,
   per-run name prefix, `qa.run` label, random published host ports (read
   back with `docker compose port`), health checks on every container, no
-  fixed host ports that could clash with the user's own stack.
+  fixed host ports that could clash with the user's own stack. The one
+  exception is a dependency that must advertise its own address (a Kafka
+  listener): a free port is pre-allocated before `compose up` and used on
+  both sides.
 - The service runs on the host (or as its own container if it has an image)
   with the override variables from the scan pointing at the containers.
 - Teardown: `docker compose -p <prefix> down -v --remove-orphans`, plus a
@@ -426,17 +432,22 @@ Reference profiles, as models for the others:
   checked after every case; an unmatched request is a failure signal.
 - **Relational DB (Postgres as the model)**: schema from the service's own
   migrations, run at boot. Seeds are plain SQL applied after migration and
-  before the trigger. Reset: truncate seeded tables (default) or a fresh
-  database per case. Assert through the service's API, and by read-only
+  before the trigger. Reset: truncate the tables the cases write to (default; never
+  reference or lookup tables filled by migrations, and no `CASCADE` unless
+  checked) or a fresh database per case. Seeds are applied only after the
+  service has migrated. Assert through the service's API, and by read-only
   query only for state the API does not expose.
 - **Messaging (Kafka as the model)**: topics/queues created with the
   partitions or bindings the service expects. Seed messages produced with the
   container's CLI (key, headers, payload per case). Outbound assertions use a
   consumer with a timeout and a unique group per run. Assertions poll with a
-  bounded timeout, never sleep.
+  bounded timeout, never sleep. Reset never deletes a topic while the
+  service runs: it truncates, and the service's group id is overridden with
+  a run-unique value.
 - **Other profiles** follow the same six answers: for example object storage
   (MinIO: bucket, objects, listing), mail (Mailpit: inbox API), identity
-  (Keycloak realm import, or WireMock for token and JWKS endpoints),
+  (Keycloak realm import, or WireMock for token and JWKS endpoints, reloaded
+  after every WireMock reset),
   search (index template, bulk load, query), NoSQL/cache (CLI seeds, flush).
 
 **Fallback for an unknown technology (`dependency-fallback.md`)**
@@ -556,15 +567,17 @@ Only for a validated plan. Order:
    trigger, assert, verify mocks, and capture evidence (request, response,
    relevant log lines, mock verification result). Unmatched mock requests
    count as a failure signal.
-4. **Write the `UNIT` tests** to the proposed paths in the test tree, copying
+4. **Write the `UNIT` tests** (isolation mode only) to the proposed paths in the test tree, copying
    the repo's conventions, and **run them** with the repo's own build tool,
    restricted to the new tests and then the module's unit suite, to confirm
    nothing else broke. They must pass without Docker. Files are left
    unstaged (rule 13).
 5. **Diagnose every failure** per rule 15 and `bug-triage.md`. A failing
    `LIVE` case is re-run once to rule out flakiness before it is called a
-   bug.
-6. **Tear down** (rule 16), including on failure or interruption.
+   bug, except a `side-effecting` remote case, which is never re-run
+   automatically. A case runs at most four times in total.
+6. **Tear down** (rule 16), including on failure or interruption. In remote
+   mode the created data is deleted before the port-forward stops.
 
 If the run is interrupted, the report still gets written from what was
 captured, with unfinished cases marked `NOT RUN`.
@@ -680,7 +693,7 @@ Defaults I chose where you gave no instruction (change any of them):
 
 | # | Topic | Default |
 |---|---|---|
-| 1 | Flaky failures | one re-run of a failing `LIVE` case before it is called a bug |
+| 1 | Flaky failures | one re-run of a failing `LIVE` case before it is called a bug (never automatic for side-effecting remote cases) |
 | 2 | Test-defect retries | at most two corrections per case, assertions never weakened |
 | 3 | Bug severity scale | blocker / major / minor / trivial, by impact on the requirement |
 | 4 | Report file | `<service>-<slug>-test-report.md`, next to the plan |
