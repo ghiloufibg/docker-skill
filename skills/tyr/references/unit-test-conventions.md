@@ -73,7 +73,9 @@ Signatures and data, never test bodies, in the plan.
    `gradlew test --tests com.acme.orders.domain.PriceCalculatorTest`
    (use `mvnw`/`gradlew` if the wrapper exists; on Windows `.cmd`).
 3. Check statically that the new file imports nothing from Testcontainers,
-   Spring test slices, `java.net` or JDBC. If it does, fix the test.
+   Spring test slices, socket or HTTP-client classes (`java.net.Socket`,
+   `java.net.http`, `HttpURLConnection`, OkHttp, Apache HttpClient) or JDBC.
+   `java.net.URI` and similar pure types are fine. If it does, fix the test.
 4. Then run the module's unit suite to confirm nothing else broke.
 5. Leave the files unstaged. Report their paths.
 

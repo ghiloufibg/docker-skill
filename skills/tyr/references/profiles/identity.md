@@ -29,7 +29,9 @@ what the service expects.
 
 Keycloak: a realm import file with the realm, clients, roles and test users the
 cases need (synthetic credentials). WireMock route: the discovery document and
-JWKS built from the run's public key.
+JWKS built from the run's public key. WireMock's reset between cases wipes them,
+so they are part of every case's stubs and are reloaded after each reset, before
+the token is presented.
 
 ## Seed
 

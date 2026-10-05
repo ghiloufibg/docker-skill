@@ -12,7 +12,9 @@ Contingent cases are skipped. Anything the plan does not list is not done.
    current-context`, class dev/rec). If anything differs from the plan, stop and
    report the difference. Never start on a stale plan, and never switch a
    context.
-2. **Create the run identity** (`environment-design.md`) and the working folder.
+2. **Create the run identity**, in both modes: `run-id` = `qa-<yyMMddHHmm>-<4 hex>`.
+   Create the working folder (`environment-design.md`). Compose naming and
+   labels apply to isolation only.
 3. **Keep an evidence log** and a cleanup list as you go: every container,
    network, volume, process, port-forward and, in remote mode, every created
    record, is added to the cleanup list at the moment it is created.
@@ -25,9 +27,13 @@ Contingent cases are skipped. Anything the plan does not list is not done.
    stubs, seeds and scripts it lists.
 2. `docker compose -p tyr-<service>-<run-id> up -d`; wait for every health check
    (bounded; on timeout, report the container logs and stop).
-3. Initialise each dependency (schemas, topics, buckets, realms) per its profile.
+3. Initialise what the service does not create itself, per profile: buckets,
+   realms, topics the service does not auto-create, index templates it does not
+   create. Databases are created empty here; their schema comes from the
+   service's migrations in the next step.
 4. Start the service with the override variables, log to the working folder, and
-   wait for readiness (bounded).
+   wait for readiness (bounded). Seeds are applied only after readiness, case by
+   case, so migrations have already run.
 
 **Remote**
 
@@ -62,10 +68,15 @@ reached (interruption) is `NOT RUN`.
 
 ## 3. Write and run the UNIT tests
 
+Isolation mode only; in remote mode there is no `UNIT` class, so skip this
+section.
+
 1. Write each file at the proposed path, copying the neighbours' conventions
    (`unit-test-conventions.md`). Do not touch production code.
 2. Check statically that no new file imports Testcontainers, a Spring test slice,
-   `java.net` or JDBC.
+   socket or HTTP-client classes (`java.net.Socket`, `java.net.http`,
+   `HttpURLConnection`, OkHttp, Apache HttpClient) or JDBC. `java.net.URI` and
+   similar pure types are fine.
 3. Run the new test class(es) with the repo's build tool (wrapper if present;
    `.cmd` on Windows), then the module's unit suite. Capture the summary.
 4. Leave the files unstaged. Never run `git add` or `git commit`.
@@ -77,7 +88,11 @@ A failing unit test follows section 4.
 For every `FAIL`, apply `bug-triage.md`:
 
 - Re-run a failing `LIVE` case once to rule out flakiness. A different result
-  the second time is recorded as flaky, with both outcomes.
+  the second time is recorded as flaky, with both outcomes. In remote mode never
+  re-run a `side-effecting` case automatically (a second email, message or
+  partner call is a real second effect): diagnose from the first run's evidence
+  and offer the user a single manual re-run. A case runs at most four times in
+  total (the original, the flakiness re-run, and two corrected re-runs).
 - Classify: service bug, test defect, environment problem, or unclear
   requirement.
 - A test defect or environment problem may be corrected (the stub, the seed, the
@@ -90,9 +105,9 @@ For every `FAIL`, apply `bug-triage.md`:
 
 Runs after success, failure or interruption, in this order:
 
-1. Stop the service process, and any port-forward.
-2. Remote: delete the data still on the cleanup list through the API, in reverse
-   order of creation; retry once.
+1. Remote: delete the data still on the cleanup list through the API, in reverse
+   order of creation; retry once. The port-forward must still be up for this.
+2. Stop the service process, and any port-forward.
 3. Isolation: `docker compose -p <project> down -v --remove-orphans`, then the
    label sweep (`tyr.run=<run-id>`) for containers, networks and volumes.
 4. Verify nothing labelled with the run id remains.

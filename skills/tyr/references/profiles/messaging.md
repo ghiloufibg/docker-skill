@@ -8,7 +8,9 @@ Pub/Sub (emulator) and Service Bus follow the same shape. Isolation mode.
 The broker image installed locally (Kafka in KRaft mode needs no ZooKeeper
 container if the image supports it). Advertised listeners must be reachable
 both from the service on the host and from other containers: set a host
-listener on the mapped port. Health check: the broker's own API-versions or
+listener on a host port that is pre-allocated before `compose up` (find a free
+port, publish the broker on exactly that port, and advertise the same one);
+a randomly assigned port is not known in time. Health check: the broker's own API-versions or
 status command.
 
 If the service uses a schema registry, add its container (or a mock of its
@@ -37,10 +39,14 @@ deliver it; payloads follow the schema (Avro/JSON/Protobuf) from the repo.
 
 ## Reset
 
-Use a unique consumer group per run so offsets never leak between cases.
-Between cases: delete and recreate the topics the case touched, or purge the
-queues. For a long run, a fresh broker per group of cases is the strongest
-option.
+Override the service's own consumer group id with a run-unique value so
+offsets never leak between runs, and use a unique group for the checking
+consumer. Never delete or recreate a topic while the service is running: its
+consumer would see the topic vanish or auto-recreate it with the wrong
+partitions. Between cases truncate instead (`kafka-delete-records` up to the end
+offsets for Kafka, purge for queues). If a case needs a clean topic and
+truncation is not enough, restart the service after recreating it. For a long
+run, a fresh broker per group of cases is the strongest option.
 
 ## Assert
 

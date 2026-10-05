@@ -27,6 +27,9 @@ Rules:
 - No fixed host ports. Publish with `127.0.0.1::<port>` so Docker picks free
   ports; read them back with `docker compose -p <project> port <svc> <port>`.
   The user's own stack is never clashed with.
+- Exception: a dependency that must advertise its own address (a Kafka
+  listener). Pre-allocate a free port before `compose up` and use it on both
+  sides.
 - A health check on every container; start order uses `depends_on` with
   `condition: service_healthy`.
 - No volumes that survive teardown (tmpfs or anonymous volumes).

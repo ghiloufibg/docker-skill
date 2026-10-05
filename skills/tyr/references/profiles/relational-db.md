@@ -35,8 +35,11 @@ steps can refer to them.
 
 ## Reset
 
-Default: truncate the seeded tables between cases
-(`TRUNCATE ... RESTART IDENTITY CASCADE` in Postgres), in one statement. A
+Default: truncate the tables the cases write to (the seeded tables and the
+tables the service writes), listed in the plan, in one statement
+(`TRUNCATE ... RESTART IDENTITY` in Postgres). Never truncate reference or lookup
+tables filled by migrations, nor the migration history tables. Avoid `CASCADE`
+unless the plan has checked that it reaches no such table. A
 stricter option, a fresh database per case, is slower; choose it only when
 truncation cannot restore the state (sequences, triggers, materialized views).
 State the choice in the plan.

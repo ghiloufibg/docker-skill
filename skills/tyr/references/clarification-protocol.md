@@ -39,7 +39,8 @@ non-blocking.
 
 ## The batch
 
-If nothing is open, say so in one line and continue. Otherwise present
+If nothing is open, say so in one line, still show the triage table, and
+continue unless the user moves a case. Otherwise present
 everything in one batch, with the triage table first, blocking questions next:
 
 ```

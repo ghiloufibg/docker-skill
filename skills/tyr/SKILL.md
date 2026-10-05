@@ -50,7 +50,9 @@ It works in two phases with one gate between them.
    Unit tests are the only artifacts meant for the service's test tree, each
    with a proposed path.
 10. **Remote mode targets dev or rec only,** named by the user for the run.
-    Production, or an environment that cannot be classified, is refused. Never
+    Production, or a name that looks like it, is refused. An environment that
+    cannot be classified is accepted only if the user states explicitly that it
+    is a test environment, and the plan records that statement. Never
     log in to GCP or switch a kubectl context; verify and report.
 11. **Secrets are never decrypted for planning.** SOPS leaves key names
     readable. At run time they are decrypted straight into the process
@@ -126,9 +128,10 @@ isolation mode match `docker image ls` against the images needed.
 
 ### 5. The open-question gate
 
-Follow `references/clarification-protocol.md`. If anything is open, present
-one batch (blocking first, options, a recommended default) together with the
-triage table, and wait. Two rounds at most.
+Follow `references/clarification-protocol.md`. Always show the
+triage table. If anything is open, present one batch (blocking first, options, a
+recommended default) with it and wait; if nothing is open, say so, show the
+table, and continue unless the user moves a case. Two rounds at most.
 
 ### 6. Design
 

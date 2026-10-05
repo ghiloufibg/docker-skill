@@ -19,10 +19,11 @@ use-context` or anything that changes the session.
    - `kubectl config current-context`
    - `sops --version`
 3. Classify the environment from the names found (project, context, cluster,
-   namespace, overlay). Accept only dev and rec class. Refuse names that look
-   like production (`prod`, `prd`, `live`, `production`), and anything that
-   cannot be classified, unless the user states explicitly that it is a test
-   environment. If the active context does not match what the user named,
+   namespace, overlay). Accept only dev and rec class. Refuse
+   names that look like production (`prod`, `prd`, `live`, `production`),
+   always. An environment that cannot be classified is accepted only if the
+   user states explicitly that it is a test environment; record the statement
+   in the plan. If the active context does not match what the user named,
    stop and report both; do not switch it.
 4. Record in the plan: project, cluster, namespace, overlay, context, date.
 
@@ -102,8 +103,9 @@ the user validates. Real partner calls are listed with the partner host.
 
 ## 6. Data and cleanup
 
-- Test data carries a run marker in business identifiers: `qa-<run-id>`
-  (for example a customer reference `qa-2410051430-a3f1`). Other people share
+- Test data carries a run marker in business identifiers: the `run-id`
+  itself, which already starts with `qa-` (for example a customer reference
+  `qa-2410051430-a3f1-001`). Other people share
   these environments, and the marker lets them tell the data apart.
 - Create data through the service's own API. Record every created identifier
   as it is created.
