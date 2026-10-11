@@ -1,6 +1,6 @@
 # Design: review memory for `forseti`, learned from past GitLab merge requests
 
-Status: design only (revision 5). Nothing is implemented yet. The feature is
+Status: implemented (revision 5), see section 14. The feature is
 called **review memory**: it is part of forseti, not a separate skill. Its
 scripts live in `skills/forseti/scripts/review-memory/`.
 
@@ -146,9 +146,9 @@ most recent MRs of which many have no comments. To avoid paging through a
 whole project that has few reviews, it also stops after scanning 10 × N MRs,
 and says so in the summary.
 
-The approvals API exists only on GitLab Premium/Ultimate. At startup the script
-tests it on the first project; if it is unavailable, only merged MRs are kept
-and the summary says so.
+The approvals API exists only on GitLab Premium/Ultimate. The first time a
+project needs it, a `403` or `404` marks it unavailable for that project: only
+merged MRs are kept from then on, and the summary says so.
 
 Open, unapproved MRs are skipped: their review isn't settled. Open approved
 MRs are kept and marked `mr_state: open_approved`, since their code can still
@@ -175,9 +175,8 @@ Both thread types are kept:
 | `GET /projects/:id/merge_requests?state=merged&order_by=updated_at` and `?state=opened` | list candidate MRs, paginated |
 | `GET .../merge_requests/:iid/approvals` | approval state of open MRs |
 | `GET .../merge_requests/:iid/discussions` | threads, notes, `position`, `resolved` |
-| `GET .../merge_requests/:iid/versions` | `diff_refs` of each version, to find the code a comment was on |
-| `GET .../merge_requests/:iid/diffs` | the diff hunks |
-| `GET .../merge_requests/:iid/commits` | commits after a comment, to find whether it led to a change |
+| `GET .../merge_requests/:iid/versions` | the versions of the MR, oldest first, with their head commit |
+| `GET .../merge_requests/:iid/versions/:version_id` | the diff of each version, to find the code a comment was on and whether a later version changed it (only for MRs that have diff threads, Java files only) |
 
 ### 4.6 Parallel execution
 
@@ -193,9 +192,11 @@ Both thread types are kept:
   is recorded and doesn't stop the others. The run's exit code is non-zero if
   any project failed.
 - Progress is printed per project: `[order-service] 120/200 MRs kept, 480 scanned`.
-- Every response is cached under `raw/<project-slug>/<mr_iid>/`. A rerun reads
-  the cache and only asks GitLab for MRs updated since the last run
-  (`state.json`, one date per project).
+- Every response is cached under `raw/<project-slug>/<mr_iid>/`, together with
+  the MR's `updated_at`. A rerun still lists the MRs (cheap, 100 per page) but
+  reads the cache for every MR whose `updated_at` is unchanged, and only asks
+  GitLab for the details of new or updated MRs. `state.json` records the last
+  successful sync date per project.
 
 Stage 2 starts only after all threads have finished. It is the only step
 that writes shared files.
@@ -248,7 +249,7 @@ skills/forseti/memory/                     gitignored (D9)
       threads.jsonl
   by-path/
     order-service/
-      OrderService.java.3f9a1c.jsonl
+      com__example__order__OrderService.java.jsonl
   by-check/          written by stage 3
     hexagonal-boundary.jsonl
     naming.jsonl
@@ -269,10 +270,12 @@ skills/forseti/memory/                     gitignored (D9)
 
 - `projects/` is the full data, one folder per project.
 - `by-path/<project>/` holds the same threads split by file. The file name is
-  the file's base name plus the first 6 characters of a hash of its
-  repo-relative path (`OrderService.java.3f9a1c.jsonl`), which keeps names
-  short enough for Windows. `manifest.json` holds the path-to-name map, and
-  forseti computes the same name, so no grep is needed. Forseti was made portable to
+  the repo-relative path with everything up to `src/main/java/` removed
+  (`src/test/java/` becomes a `test/` prefix), `/` replaced by `__`, and only
+  the last 120 characters kept, which keeps names short enough for Windows.
+  Forseti computes the same name from the path (the rule is in
+  `references/review-memory.md`), so there is no hash to compute and no
+  grep. Forseti was made portable to
   Copilot by dropping Unix-only grep instructions, and this keeps it that way.
 - `by-check/` holds, for each forseti checklist, the best real examples of that
   kind of issue across all projects (stage 3 picks them: addressed threads,
@@ -338,7 +341,7 @@ How it runs, in two commands:
 `label.py prepare`
 - Skips thread ids already in `labels.jsonl`.
 - Splits the rest into batches of 20-50. Each `prompts/label-NNN.md` holds the
-  fixed instructions (from `prompts/label.instructions.md`) and, per thread,
+  fixed instructions (from `scripts/review-memory/instructions/label.md`) and, per thread,
   only `id`, `file_path`, `layer`, `code`, `comment`, the first reply and `fix`,
   never the whole MR. The instructions ask for JSONL only.
 - Prints the number of prompt files and the estimated tokens (characters
@@ -398,8 +401,11 @@ seen 2026-08-19. Examples: `payment-service!412#d81f`, `order-service!88#a03c`
 ```
 
 Rule ids (`T7`) are allocated by the script and never reused: `rules/ids.json`
-maps each approved rule to its id, so a rerun keeps existing ids and gives new
-rules the next free number.
+maps each group key (`check|category|layer`) to its id the first time a rule is
+written for it, so a rerun keeps existing ids and gives new groups the next free
+number. The script, not the AI, writes the Evidence line from the group's
+statistics, and rejects an answer that names a project in the Rule, Flag or
+Finding template.
 
 Example ids point into the memory folder, so forseti (and a person) can open
 the full thread.
@@ -411,7 +417,7 @@ rules and forseti's reference files
 (`hexagonal-boundary-checklist.md`, `naming-checklist.md`,
 `java21-modern-idioms.md`, `spring-boot3-practices.md`,
 `test-quality-checklist.md`, `no-comments-policy.md`). The user runs it in
-Copilot CLI; `distill.py ingest` validates the answers and writes
+Copilot CLI; the second `distill.py ingest` validates the answer and writes
 `rules/candidates.md` and `rules/reconcile.md`, which puts every rule in one
 bucket:
 
@@ -523,3 +529,18 @@ to compare measured usage with the estimate.
 | B | `label.py prepare` / `ingest`, pilot | Prompts for 100 threads written, answers ingested, `by-check/` built, measured tokens compared with the estimate. |
 | C | Full labeling, `distill.py prepare` / `ingest` | `rules/candidates.md` and `rules/reconcile.md` produced. |
 | D | Approval and forseti integration (sections 9–10) | `team-review-rules.md` and `review-memory.md` committed, `SKILL.md` updated, `memory/` gitignored, replay run once. |
+
+### Implementation status
+
+All four stages are written and covered by 47 unit tests
+(`python -m unittest discover -s tests` in `skills/forseti/scripts/review-memory/`),
+run against a fake GitLab server. Nothing has run against a real GitLab yet. What
+the tests cannot show, and what is still to do on real data:
+
+- the first `fetch_mrs.py` run on 2-3 real projects (field names such as
+  `original_position` and the `versions/:id` payload follow the GitLab API
+  documentation and are untested against the company instance);
+- the labeling pilot with `--max-threads 100`, to compare measured tokens with
+  the estimate in section 11;
+- the replay in section 12, and the first approved rules in
+  `references/team-review-rules.md`, which has no checks yet.

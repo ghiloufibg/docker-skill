@@ -104,3 +104,10 @@ There is no file and line. Use the plan's section heading (and the item's
 name) as the location, quote the plan's text, and give the corrected plan
 text or signature as the fix. See the plan-mode variant in
 `output-template.md`.
+
+## Team rules and review memory
+
+Walk `team-review-rules.md` against the plan like any other checklist, citing
+the `T` check a finding breaks. When review memory exists, read at most 3
+examples from `memory/by-check/plan-review.jsonl`, chosen by the layers the
+plan touches. They calibrate; they never add a finding on their own.

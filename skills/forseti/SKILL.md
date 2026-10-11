@@ -32,7 +32,7 @@ the user explicitly asks for the fix to be applied.
 ## Reviewing a plan instead of code
 
 When the input is a design or implementation plan rather than source code,
-follow `references/plan-review.md` instead of steps 1–6 below as written: it
+follow `references/plan-review.md` instead of steps 1–7 below as written: it
 states which checks carry over to planned signatures and package layouts,
 which don't apply to a document, and the plan-specific completeness checks.
 The severity scale, the Docker/CI reality check, and the report structure
@@ -101,6 +101,12 @@ Before flagging anything, establish:
   instead, and a test suite that's mostly unit tests with a small
   integration slice is the *correct* shape for that environment, not
   something to flag as a pyramid gap.
+- **Review memory**: check whether `memory/manifest.json` exists next to
+  this skill. If it does, follow `references/review-memory.md`: note which
+  projects it covers and its date, and match the reviewed repo's git remote
+  URL against the manifest to find the project under review (no match: skip
+  the per-file history, keep the rest). If there is no manifest, skip every
+  review-memory read below without comment.
 
 ### 2. Walk the hexagonal boundary checklist first
 
@@ -151,7 +157,27 @@ production code under review has tests changing in the same diff or not
 — if tests are in scope, they get the same rigor as production code, not
 a lighter pass.
 
-### 6. Apply the zero-comments policy
+### Real examples while walking steps 2–5
+
+When review memory exists, open `memory/by-check/<check>.jsonl` while walking
+that checklist (`hexagonal-boundary` for step 2, `naming` and `java21-idioms`
+for step 3, `spring-boot3` for step 4, `test-quality` for step 5) and read at
+most 5 examples, `addressed` first. They show what this team's reviewers flag
+under that check and at what severity; they calibrate, they never add a finding
+by themselves. For each file in scope, also open its `memory/by-path` file (name
+rule in `references/review-memory.md`) and read at most the 3 most recent
+`addressed` threads: if a past comment applies to the current code, report it
+under the matching check and cite its `mr_url` as supporting evidence.
+
+### 6. Walk the team rules
+
+Follow `references/team-review-rules.md` like any other checklist: same
+severity scale, same evidence rule, same report structure. Each check there
+came from recurring reviewer feedback and was approved by a person. A finding
+cites the check it breaks (for example "Team rules — T7"). Skip this step
+when the file lists no checks.
+
+### 7. Apply the zero-comments policy
 
 Follow `references/no-comments-policy.md`. This applies to **every file in
 scope, including tests** — flag every comment and every Javadoc block found,
@@ -160,7 +186,7 @@ scaffolding comments in test methods, which get their own explicit call-out
 because they're the most common instance of this violation in
 tool-generated code.
 
-### 7. Write the report
+### 8. Write the report
 
 Use the exact structure in `references/output-template.md`. Group findings
 by severity, not by file — a developer fixing a review works top-down by

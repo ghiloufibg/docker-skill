@@ -1,6 +1,6 @@
 # Output template
 
-`SKILL.md` step 7 says to use this structure exactly. Every finding must
+`SKILL.md` step 8 says to use this structure exactly. Every finding must
 be concrete — a real file, a real line, real code quoted from the file
 under review, and a real corrected snippet. A finding that just cites a
 rule name without showing the actual offending line isn't finished.
@@ -107,4 +107,4 @@ A single small file with two or three findings doesn't need the full
 `## Summary` counts table or a `## What's already good` section — a short
 inline reply with the findings grouped by severity is enough. Reserve the
 full template, and saving it to `.copilot/`, for a review spanning
-several files or a whole PR, per `SKILL.md` step 7.
+several files or a whole PR, per `SKILL.md` step 8.

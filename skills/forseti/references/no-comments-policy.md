@@ -1,6 +1,6 @@
 # Zero-comments policy
 
-`SKILL.md` step 6 points here. This is this skill's own invariant, stated
+`SKILL.md` step 7 points here. This is this skill's own invariant, stated
 explicitly because it's stricter than a general-purpose default: **every
 comment and every Javadoc block found in reviewed code is a finding, with
 no exception list.** This applies to production code and test code alike.
