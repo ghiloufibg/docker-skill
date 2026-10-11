@@ -1,23 +1,20 @@
 # Design: review memory for `forseti`, learned from past GitLab merge requests
 
-Status: design only (revision 4). Nothing is implemented yet. The feature is
-called **review memory**: it is part of forseti, not a separate skill.
+Status: implemented (revision 5), see section 14. The feature is
+called **review memory**: it is part of forseti, not a separate skill. Its
+scripts live in `skills/forseti/scripts/review-memory/`.
 
-Revision 4: the feature has a plain name, review memory, and its scripts live
-in `skills/forseti/scripts/review-memory/`. No open questions remain.
+Revision 5: the scripts never call an AI. They fetch, structure and prepare
+the data, and write ready-to-paste prompt files; the user runs them in Copilot
+CLI and puts the answers back for the scripts to validate (D6). The reference
+for the GitLab client is `tools/gitlab/gitlab-fetch.js` of
+`ghiloufibg/supercopilot` (D3). Fixes from review: global grouping by layer,
+an index for plan-review examples, Windows-safe file names, a rule for
+`addressed`, stable rule ids, an approvals fallback.
 
-Revision 3: the team rules are global: one shared file for all projects and
-services, never per project. The AI steps don't depend on a specific tool:
-the scripts call one configurable command. The awesome-copilot repo is not
-an open question any more: it is given as input in the prompt when the
-scripts are developed.
-
-Revision 2: the fetch is our own script, modeled on the GitLab client in the
-awesome-copilot repo instead of calling it. It takes a list of project URLs
-and a number of MRs per project as input, with defaults written at the top of
-the script, and fetches the projects in parallel, one thread per project. The
-output is written next to the forseti skill and forseti reads it directly:
-approved rules, plus real examples by checklist and by file. All hosts and
+Earlier revisions: the fetch script takes project URLs and an MR count with
+defaults at the top and fetches projects in parallel (rev 2); team rules are
+global (rev 3); the feature got its name and folder (rev 4). All hosts and
 projects in this document are placeholders (`gitlab.example.com`).
 
 ## 1. Purpose and scope
@@ -51,11 +48,11 @@ Out of scope:
 |---|---|---|
 | D1 | The user runs the scripts on their own machine. | GitLab may only be reachable from the user's network, and the token stays on that machine. |
 | D2 | No dependencies: Python 3 standard library only, no database, no `pip install`. Data is stored as JSONL and plain files. | Nothing to install or maintain. Any agent (Copilot, Claude Code) can read files. |
-| D3 | The fetch script is **our own**, modeled on the GitLab client in the awesome-copilot repo. The user gives that repo as input in the prompt when the scripts are developed; we reuse its patterns (authentication, pagination, error handling, retries), not its code as a dependency. | Keeps the script standalone (D2) while following an approach the team already trusts. |
+| D3 | The fetch script is **our own** Python script, modeled on `tools/gitlab/gitlab-fetch.js` in `ghiloufibg/supercopilot` (a read-only Node client). We reuse its approach (read-only GET calls, `PRIVATE-TOKEN` header, configuration from `~/.copilot/tools/.env`), not its code. The discussions, approvals, versions and diffs calls are new. | Keeps the script standalone (D2) while following an approach the team already trusts. |
 | D4 | The project URLs and the number of MRs to fetch are **inputs**: constants at the top of the script give the defaults, command-line options override them. | Edit once and run with no options, or override per run without editing the file. |
 | D5 | Projects are fetched **in parallel, one thread per project**. | Most of the time is spent waiting on the network. Projects are independent, so they don't wait on each other. |
-| D6 | The AI steps (labeling threads, writing rules) call **one configurable command** (`AI_COMMAND` at the top of each AI script) that reads a prompt on standard input and writes the answer on standard output. The team's own AI CLI is the default. | The design doesn't depend on a specific tool or its flags. The scripts own batching, validation and retries; the command only answers. |
-| D7 | Steps that don't need AI use **0 AI tokens**. AI only sees data that is already filtered and trimmed. | Token cost is a stated concern. |
+| D6 | **No script calls an AI.** The AI steps (labeling, writing rules, reconciling) work in two halves: `prepare` writes prompt files, the user runs them in Copilot CLI and saves each answer to a file, `ingest` validates the answers and continues. | The team uses Copilot CLI and wants to run it themselves. The design depends on no tool or flags, and the user decides what code leaves their machine. |
+| D7 | Steps that don't need AI use **0 AI tokens**. Prompt files only contain data that is already filtered, trimmed and scrubbed. | Token cost is a stated concern. |
 | D8 | No rule enters forseti without a person approving it. | Rules shape every future review. A wrong rule produces noise on every MR. |
 | D9 | Real review data is never committed to this repo. Only approved rules are. The memory folder is gitignored. | Comments can contain internal names, links or secrets, and this repo holds the skill, not team data. |
 | D10 | Team rules are **global**: one shared `team-review-rules.md` for every project and service. A rule never names a project. | One standard across the team. Evidence from several projects makes a rule stronger, and every service is reviewed against the same rules. |
@@ -67,20 +64,20 @@ Out of scope:
  max MRs ──────┤
                ▼
         1. Fetch (one thread per project) ──► 2. Build output ──► 3. Label ──► 4. Distill + reconcile ──► 5. Approve ──► forseti
-           script, 0 tokens                    script, 0 tokens    AI command    script + AI command       person
+           script, 0 tokens                    script, 0 tokens    prepare/ingest  prepare/ingest          person
+                                                                   + Copilot CLI   + Copilot CLI
 ```
 
 | Stage | Script | Input | Output |
 |---|---|---|---|
 | 1. Fetch | `fetch_mrs.py` | project URLs, max MRs, GitLab token | `raw/<project>/` cached JSON |
 | 2. Build output | `fetch_mrs.py` (after all threads finish) | `raw/` | `projects/`, `by-path/`, `manifest.json` |
-| 3. Label | `label.py` | `projects/*/threads.jsonl` | `labels.jsonl`, `by-check/` |
-| 4. Distill + reconcile | `distill.py` | `labels.jsonl` + forseti references | `rules/candidates.md`, `rules/reconcile.md` |
+| 3. Label | `label.py prepare` / `ingest` | `projects/*/threads.jsonl`, answers | `prompts/label-NNN.md`, then `labels.jsonl`, `by-check/` |
+| 4. Distill + reconcile | `distill.py prepare` / `ingest` | `labels.jsonl` + forseti references, answers | `prompts/rules-NNN.md`, `prompts/reconcile.md`, then `rules/candidates.md`, `rules/reconcile.md` |
 | 5. Approve | person | `rules/*.md` | `references/team-review-rules.md` |
 | Review time | forseti | diff + rules + memory folder | forseti report (section 10) |
 
-The scripts live in the skill: `skills/forseti/scripts/review-memory/`. Every stage
-reads the previous stage's files and can be rerun on its own.
+Every stage reads the previous stage's files and can be rerun on its own.
 
 ## 4. Stage 1: fetch, in parallel
 
@@ -128,10 +125,12 @@ Each URL is split into a host and a project path:
 (GitLab accepts the URL-encoded path wherever it expects a project id). Projects
 on different GitLab hosts are allowed in the same run.
 
-Token: `GITLAB_TOKEN` environment variable, scope `read_api` only, never
-written to disk or logs. If projects live on more than one host,
-`GITLAB_TOKEN_<HOST>` (for example `GITLAB_TOKEN_GITLAB_EXAMPLE_COM`) takes
-precedence for that host.
+Token and host: read from `~/.copilot/tools/.env` (`GITLAB_BASE_URL`,
+`GITLAB_API_TOKEN`), the same file the supercopilot GitLab tool uses, with
+environment variables taking precedence. Scope `read_api` only; the token is
+never written to disk or logs. Projects whose host differs from
+`GITLAB_BASE_URL` are refused unless `GITLAB_API_TOKEN_<HOST>` (for example
+`GITLAB_API_TOKEN_GITLAB_OTHER_COM`) is set.
 
 ### 4.3 Which MRs, and what "max MRs" counts
 
@@ -146,6 +145,10 @@ stops at the limit. So the result is the N most recent reviewed MRs, not the N
 most recent MRs of which many have no comments. To avoid paging through a
 whole project that has few reviews, it also stops after scanning 10 × N MRs,
 and says so in the summary.
+
+The approvals API exists only on GitLab Premium/Ultimate. The first time a
+project needs it, a `403` or `404` marks it unavailable for that project: only
+merged MRs are kept from then on, and the summary says so.
 
 Open, unapproved MRs are skipped: their review isn't settled. Open approved
 MRs are kept and marked `mr_state: open_approved`, since their code can still
@@ -172,9 +175,8 @@ Both thread types are kept:
 | `GET /projects/:id/merge_requests?state=merged&order_by=updated_at` and `?state=opened` | list candidate MRs, paginated |
 | `GET .../merge_requests/:iid/approvals` | approval state of open MRs |
 | `GET .../merge_requests/:iid/discussions` | threads, notes, `position`, `resolved` |
-| `GET .../merge_requests/:iid/versions` | `diff_refs` of each version, to find the code a comment was on |
-| `GET .../merge_requests/:iid/diffs` | the diff hunks |
-| `GET .../merge_requests/:iid/commits` | commits after a comment, to find whether it led to a change |
+| `GET .../merge_requests/:iid/versions` | the versions of the MR, oldest first, with their head commit |
+| `GET .../merge_requests/:iid/versions/:version_id` | the diff of each version, to find the code a comment was on and whether a later version changed it (only for MRs that have diff threads, Java files only) |
 
 ### 4.6 Parallel execution
 
@@ -190,9 +192,11 @@ Both thread types are kept:
   is recorded and doesn't stop the others. The run's exit code is non-zero if
   any project failed.
 - Progress is printed per project: `[order-service] 120/200 MRs kept, 480 scanned`.
-- Every response is cached under `raw/<project-slug>/<mr_iid>/`. A rerun reads
-  the cache and only asks GitLab for MRs updated since the last run
-  (`state.json`, one date per project).
+- Every response is cached under `raw/<project-slug>/<mr_iid>/`, together with
+  the MR's `updated_at`. A rerun still lists the MRs (cheap, 100 per page) but
+  reads the cache for every MR whose `updated_at` is unchanged, and only asks
+  GitLab for the details of new or updated MRs. `state.json` records the last
+  successful sync date per project.
 
 Stage 2 starts only after all threads have finished. It is the only step
 that writes shared files.
@@ -211,10 +215,14 @@ A thread is **dropped** when:
   same normalized text).
 
 A thread is **kept but marked** with:
-- `addressed: true` when a later commit in the same MR changed the lines the
-  comment points at, or the thread was resolved and the author replied with a
-  change. This is the strongest sign the comment was valid; stage 3 and
-  forseti prefer these threads.
+- `addressed: true` when the hunk the comment points at changed in a later
+  version of the MR. Line numbers move between versions, so the script does
+  not compare them: it takes the diff of the file in the version the comment
+  was made on (`position.head_sha`), finds the commented hunk, and checks
+  whether the same file in the next version still has that hunk unchanged.
+  `fix` is the changed hunk. A thread resolved with an author reply but no
+  change to the hunk is `false`. This is the strongest sign the comment was
+  valid; stage 3 and forseti prefer these threads.
 - `addressed: false` otherwise. A resolved thread with no code change can
   still be a valid "don't do this next time".
 
@@ -241,15 +249,18 @@ skills/forseti/memory/                     gitignored (D9)
       threads.jsonl
   by-path/
     order-service/
-      src__main__java__com__example__order__OrderService.java.jsonl
+      com__example__order__OrderService.java.jsonl
   by-check/          written by stage 3
     hexagonal-boundary.jsonl
     naming.jsonl
+    plan-review.jsonl
     java21-idioms.jsonl
     spring-boot3.jsonl
     test-quality.jsonl
     no-comments.jsonl
     team-rules.jsonl
+  prompts/           prepared prompt files, one per batch (D6)
+  answers/           Copilot CLI answers saved by the user, one per prompt
   labels.jsonl       stage 3 output, one line per thread id
   rules/
     candidates.md    stage 4 output
@@ -259,13 +270,18 @@ skills/forseti/memory/                     gitignored (D9)
 
 - `projects/` is the full data, one folder per project.
 - `by-path/<project>/` holds the same threads split by file. The file name is
-  the repo-relative path with `/` replaced by `__`. Forseti finds a file's
-  history by opening one file, no grep needed. Forseti was made portable to
+  the repo-relative path with everything up to `src/main/java/` removed
+  (`src/test/java/` becomes a `test/` prefix), `/` replaced by `__`, and only
+  the last 120 characters kept, which keeps names short enough for Windows.
+  Forseti computes the same name from the path (the rule is in
+  `references/review-memory.md`), so there is no hash to compute and no
+  grep. Forseti was made portable to
   Copilot by dropping Unix-only grep instructions, and this keeps it that way.
 - `by-check/` holds, for each forseti checklist, the best real examples of that
   kind of issue across all projects (stage 3 picks them: addressed threads,
   short code, at most 20 per checklist). This is what forseti reads to see
-  real data next to each rule.
+  real data next to each rule. `plan-review.jsonl` holds the labeled general
+  threads (`kind: general`) that plan-review mode reads.
 - `manifest.json` lets forseti check that memory exists, which projects it
   covers and how old it is, without reading anything else.
 
@@ -320,35 +336,45 @@ Each thread gets a short label, written to `labels.jsonl`:
   RECOMMENDED). A person confirms it in stage 5.
 - `rule`: a one-line rule of 15 words or fewer.
 
-How it runs:
-- Batches of 20–50 threads. Only `id`, `file_path`, `layer`, `code`, `comment`,
-  the first reply and `fix` are sent, never the whole MR.
-- Each batch is sent to `AI_COMMAND` (D6) with one fixed prompt file
-  (`prompts/label.md`) and must come back as JSONL.
-- Each answer is validated (valid JSON, known category, check and severity).
-  A failed batch is retried once, then logged and skipped.
-- Thread ids already in `labels.jsonl` are never sent again.
-- `--dry-run` prints the number of batches and estimated tokens (characters ÷ 4)
-  without calling anything. `--max-threads N` caps a run.
-- At the end, the script rebuilds `by-check/` from the labels (no AI).
+How it runs, in two commands:
+
+`label.py prepare`
+- Skips thread ids already in `labels.jsonl`.
+- Splits the rest into batches of 20-50. Each `prompts/label-NNN.md` holds the
+  fixed instructions (from `scripts/review-memory/instructions/label.md`) and, per thread,
+  only `id`, `file_path`, `layer`, `code`, `comment`, the first reply and `fix`,
+  never the whole MR. The instructions ask for JSONL only.
+- Prints the number of prompt files and the estimated tokens (characters
+  / 4). `--max-threads N` caps a run, so the pilot is the first 100 threads.
+
+The user then runs each prompt in Copilot CLI and saves the answer as
+`answers/label-NNN.jsonl`.
+
+`label.py ingest`
+- Validates each answer (valid JSON, known id, category, check and severity)
+  and appends valid lines to `labels.jsonl`.
+- Lists the batches with missing or invalid lines. Rerunning `prepare` then
+  produces prompts for just those threads, since they have no label yet.
+- Rebuilds `by-check/` from the labels (no AI).
 
 ## 7. Stage 4: distill rules and reconcile with forseti
 
 ### 7.1 Group (no AI)
 
 Keep labels with `keep: true`. Group them by `forseti_check` + `category` +
-top-level package. Inside a group, count threads, distinct MRs, distinct
+`layer` (domain, application, adapter). Inside a group, count threads, distinct MRs, distinct
 projects and reviewers, and how many were `addressed`. Groups backed by fewer
 than 3 MRs are listed as "seen once or twice" and don't become rules.
 
 Since rules are global (D10), groups are built across all projects, never per
-project. A group whose evidence comes from a single project can still become a
+project, and never by package name, which is project-specific. A group whose evidence comes from a single project can still become a
 rule, but it is marked "1 project" so the approver can judge whether it is a
 team standard or a habit of one codebase.
 
-### 7.2 Write rules (AI)
+### 7.2 Write rules (Copilot CLI)
 
-One call per group. The input is the group's one-line rules plus 2 example
+`distill.py prepare` writes one prompt per group (`prompts/rules-NNN.md`) and
+the user runs it in Copilot CLI. The input is the group's one-line rules plus 2 example
 threads (the shortest addressed ones), never all the raw threads. The output
 uses forseti's checklist format, so an approved rule can be pasted in as is.
 Rules are written in general terms: no project name, no project-specific
@@ -374,16 +400,26 @@ seen 2026-08-19. Examples: `payment-service!412#d81f`, `order-service!88#a03c`
 <DomainError> so the caller knows the operation failed.`
 ```
 
+Rule ids (`T7`) are allocated by the script and never reused: `rules/ids.json`
+maps each group key (`check|category|layer`) to its id the first time a rule is
+written for it, so a rerun keeps existing ids and gives new groups the next free
+number. The script, not the AI, writes the Evidence line from the group's
+statistics, and rejects an answer that names a project in the Rule, Flag or
+Finding template.
+
 Example ids point into the memory folder, so forseti (and a person) can open
 the full thread.
 
 ### 7.3 Reconcile with forseti's existing rules
 
-`AI_COMMAND` gets the candidate rules and forseti's reference files
+`distill.py prepare` writes `prompts/reconcile.md`, which holds the candidate
+rules and forseti's reference files
 (`hexagonal-boundary-checklist.md`, `naming-checklist.md`,
 `java21-modern-idioms.md`, `spring-boot3-practices.md`,
-`test-quality-checklist.md`, `no-comments-policy.md`). It puts every rule in
-one bucket in `rules/reconcile.md`:
+`test-quality-checklist.md`, `no-comments-policy.md`). The user runs it in
+Copilot CLI; the second `distill.py ingest` validates the answer and writes
+`rules/candidates.md` and `rules/reconcile.md`, which puts every rule in one
+bucket:
 
 | Bucket | Meaning | Default action |
 |---|---|---|
@@ -401,7 +437,9 @@ global rules file (D10): every project and service is reviewed against it.
 Each run of stage 4 updates that one file; there is no per-project copy. That file is
 the only output committed to git, and it contains only rules and trimmed,
 scrubbed before/after snippets, never full threads. Rejected rules go to
-`rules/rejected.md` so they aren't proposed again.
+`rules/rejected.md` so they aren't proposed again. The memory folder stays on
+the machine that built it: teammates get the rules from git, and rebuild the
+examples with their own run if they want them.
 
 ## 9. What forseti references
 
@@ -447,16 +485,16 @@ If the `memory/` folder doesn't exist, forseti skips items 1, 2 and 4 without
 comment and works as it does today; team rules (item 3) still apply.
 
 Plan-review mode reads team rules the same way, and reads past examples only
-from general threads (`kind: general`), at most 3, chosen by the plan's
-packages.
+from `memory/by-check/plan-review.jsonl` (general threads), at most 3,
+chosen by the plan's layers.
 
 ## 11. Token budget
 
 | Where | Cost | How it's kept down |
 |---|---|---|
 | Stages 1–2 | 0 | Plain scripts (D7). |
-| Stage 3, labeling | one-time, the largest | Filters first (5.1), short records (about 200–400 tokens each), batches of 20–50, cheapest model the AI command offers, nothing labeled twice, `--dry-run` estimate first. |
-| Stage 4, rules | one-time, small | Grouped by script first. AI sees one-line rules and 2 examples per group. One reconcile call over the rules list. |
+| Stage 3, labeling | one-time, the largest | Filters first (5.1), short records (about 200–400 tokens each), batches of 20–50, nothing labeled twice, the `prepare` estimate before running anything. |
+| Stage 4, rules | one-time, small | Grouped by script first. Each prompt has one-line rules and 2 examples per group. One reconcile prompt over the rules list. |
 | Each review | recurring, the one that matters | Team rules under 2k tokens. At most 5 examples per checklist actually walked, at most 3 past threads per file in scope, all already trimmed. `projects/*/threads.jsonl` is never loaded in full. |
 
 Rough scale: 3 projects × 200 MRs, about 2,000 threads after filtering ×
@@ -475,17 +513,34 @@ to compare measured usage with the estimate.
 - **Refresh:** rerun stages 1–4 on a schedule (for example monthly). Rules whose
   evidence stops growing are proposed for removal in `reconcile.md`.
 
-## 13. Inputs given at development time
+## 13. Inputs and assumptions
 
-None of these are open design questions: the awesome-copilot repo
-whose GitLab client `fetch_mrs.py` is modeled on (D3), and the value of
-`AI_COMMAND` (D6).
+- Reference client: `tools/gitlab/gitlab-fetch.js` in `ghiloufibg/supercopilot` (D3).
+- The company GitLab is probably Premium; the script checks and falls back (4.3).
+- Copilot CLI is run by the user; no command or flags are baked into the scripts.
+- All projects are on the host in `GITLAB_BASE_URL`; other hosts need the
+  per-host token (4.2).
 
 ## 14. Staged plan
 
 | Stage | Delivers | Done when |
 |---|---|---|
 | A | `fetch_mrs.py` (stages 1–2) | The user runs it on 2–3 projects in parallel and gets `projects/`, `by-path/`, `manifest.json` and a per-project summary. |
-| B | `label.py`, pilot | 100 threads labeled, `by-check/` built, measured tokens compared with the estimate. |
-| C | Full labeling, `distill.py` | `rules/candidates.md` and `rules/reconcile.md` produced. |
+| B | `label.py prepare` / `ingest`, pilot | Prompts for 100 threads written, answers ingested, `by-check/` built, measured tokens compared with the estimate. |
+| C | Full labeling, `distill.py prepare` / `ingest` | `rules/candidates.md` and `rules/reconcile.md` produced. |
 | D | Approval and forseti integration (sections 9–10) | `team-review-rules.md` and `review-memory.md` committed, `SKILL.md` updated, `memory/` gitignored, replay run once. |
+
+### Implementation status
+
+All four stages are written and covered by 47 unit tests
+(`python -m unittest discover -s tests` in `skills/forseti/scripts/review-memory/`),
+run against a fake GitLab server. Nothing has run against a real GitLab yet. What
+the tests cannot show, and what is still to do on real data:
+
+- the first `fetch_mrs.py` run on 2-3 real projects (field names such as
+  `original_position` and the `versions/:id` payload follow the GitLab API
+  documentation and are untested against the company instance);
+- the labeling pilot with `--max-threads 100`, to compare measured tokens with
+  the estimate in section 11;
+- the replay in section 12, and the first approved rules in
+  `references/team-review-rules.md`, which has no checks yet.
