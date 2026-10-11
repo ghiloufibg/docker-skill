@@ -1,8 +1,14 @@
 # Design: review memory for `forseti`, learned from past GitLab merge requests
 
-Status: design only (revision 2). Nothing is implemented yet. Working name
+Status: design only (revision 3). Nothing is implemented yet. Working name
 for the component: `muninn`, after the raven that flies over the world every
 day and brings back to Odin what it remembers. The name is open (section 13).
+
+Revision 3: the team rules are global: one shared file for all projects and
+services, never per project. The AI steps don't depend on a specific tool:
+the scripts call one configurable command. The awesome-copilot repo is not
+an open question any more: it is given as input in the prompt when the
+scripts are developed.
 
 Revision 2: the fetch is our own script, modeled on the GitLab client in the
 awesome-copilot repo instead of calling it. It takes a list of project URLs
@@ -43,13 +49,14 @@ Out of scope:
 |---|---|---|
 | D1 | The user runs the scripts on their own machine. | GitLab may only be reachable from the user's network, and the token stays on that machine. |
 | D2 | No dependencies: Python 3 standard library only, no database, no `pip install`. Data is stored as JSONL and plain files. | Nothing to install or maintain. Any agent (Copilot, Claude Code) can read files. |
-| D3 | The fetch script is **our own**, modeled on the GitLab client in the awesome-copilot repo. The user points to that repo, and we reuse its patterns (authentication, pagination, error handling, retries), not its code as a dependency. | Keeps the script standalone (D2) while following an approach the team already trusts. |
+| D3 | The fetch script is **our own**, modeled on the GitLab client in the awesome-copilot repo. The user gives that repo as input in the prompt when the scripts are developed; we reuse its patterns (authentication, pagination, error handling, retries), not its code as a dependency. | Keeps the script standalone (D2) while following an approach the team already trusts. |
 | D4 | The project URLs and the number of MRs to fetch are **inputs**: constants at the top of the script give the defaults, command-line options override them. | Edit once and run with no options, or override per run without editing the file. |
 | D5 | Projects are fetched **in parallel, one thread per project**. | Most of the time is spent waiting on the network. Projects are independent, so they don't wait on each other. |
-| D6 | The AI steps (labeling threads, writing rules) run through the **Copilot CLI**. | It's the AI tool the team already uses. No separate API key. |
+| D6 | The AI steps (labeling threads, writing rules) call **one configurable command** (`AI_COMMAND` at the top of each AI script) that reads a prompt on standard input and writes the answer on standard output. The team's own AI CLI is the default. | The design doesn't depend on a specific tool or its flags. The scripts own batching, validation and retries; the command only answers. |
 | D7 | Steps that don't need AI use **0 AI tokens**. AI only sees data that is already filtered and trimmed. | Token cost is a stated concern. |
 | D8 | No rule enters forseti without a person approving it. | Rules shape every future review. A wrong rule produces noise on every MR. |
 | D9 | Real review data is never committed to this repo. Only approved rules are. The memory folder is gitignored. | Comments can contain internal names, links or secrets, and this repo holds the skill, not team data. |
+| D10 | Team rules are **global**: one shared `team-review-rules.md` for every project and service. A rule never names a project. | One standard across the team. Evidence from several projects makes a rule stronger, and every service is reviewed against the same rules. |
 
 ## 3. Pipeline overview
 
@@ -58,7 +65,7 @@ Out of scope:
  max MRs ──────┤
                ▼
         1. Fetch (one thread per project) ──► 2. Build output ──► 3. Label ──► 4. Distill + reconcile ──► 5. Approve ──► forseti
-           script, 0 tokens                    script, 0 tokens    Copilot CLI   script + Copilot CLI      person
+           script, 0 tokens                    script, 0 tokens    AI command    script + AI command       person
 ```
 
 | Stage | Script | Input | Output |
@@ -289,7 +296,7 @@ skills/forseti/memory/                     gitignored (D9)
 `layer` uses forseti's own classification (domain, application, adapter),
 taken from the package path, so examples line up with forseti's checklists.
 
-## 6. Stage 3: label threads (Copilot CLI)
+## 6. Stage 3: label threads (AI)
 
 Each thread gets a short label, written to `labels.jsonl`:
 
@@ -314,9 +321,8 @@ Each thread gets a short label, written to `labels.jsonl`:
 How it runs:
 - Batches of 20–50 threads. Only `id`, `file_path`, `layer`, `code`, `comment`,
   the first reply and `fix` are sent, never the whole MR.
-- Each batch goes to the Copilot CLI in non-interactive mode with one fixed
-  prompt file (`prompts/label.md`) and must come back as JSONL. The exact CLI
-  flags (prompt, model choice) are to be checked against the installed version.
+- Each batch is sent to `AI_COMMAND` (D6) with one fixed prompt file
+  (`prompts/label.md`) and must come back as JSONL.
 - Each answer is validated (valid JSON, known category, check and severity).
   A failed batch is retried once, then logged and skipped.
 - Thread ids already in `labels.jsonl` are never sent again.
@@ -333,11 +339,19 @@ top-level package. Inside a group, count threads, distinct MRs, distinct
 projects and reviewers, and how many were `addressed`. Groups backed by fewer
 than 3 MRs are listed as "seen once or twice" and don't become rules.
 
-### 7.2 Write rules (Copilot CLI)
+Since rules are global (D10), groups are built across all projects, never per
+project. A group whose evidence comes from a single project can still become a
+rule, but it is marked "1 project" so the approver can judge whether it is a
+team standard or a habit of one codebase.
+
+### 7.2 Write rules (AI)
 
 One call per group. The input is the group's one-line rules plus 2 example
 threads (the shortest addressed ones), never all the raw threads. The output
-uses forseti's checklist format, so an approved rule can be pasted in as is:
+uses forseti's checklist format, so an approved rule can be pasted in as is.
+Rules are written in general terms: no project name, no project-specific
+class or package in the rule, the flag or the finding template. Project
+details only appear in the evidence line and the before/after snippet.
 
 ```markdown
 ## Check T7 — Surface outbound gateway failures
@@ -363,7 +377,7 @@ the full thread.
 
 ### 7.3 Reconcile with forseti's existing rules
 
-The Copilot CLI gets the candidate rules and forseti's reference files
+`AI_COMMAND` gets the candidate rules and forseti's reference files
 (`hexagonal-boundary-checklist.md`, `naming-checklist.md`,
 `java21-modern-idioms.md`, `spring-boot3-practices.md`,
 `test-quality-checklist.md`, `no-comments-policy.md`). It puts every rule in
@@ -380,7 +394,9 @@ one bucket in `rules/reconcile.md`:
 
 A person reads `rules/reconcile.md` and accepts or rejects each New and
 Conflict entry, and each evidence line added to an existing check. Accepted
-rules go into `skills/forseti/references/team-review-rules.md`. That file is
+rules go into `skills/forseti/references/team-review-rules.md`, the single
+global rules file (D10): every project and service is reviewed against it.
+Each run of stage 4 updates that one file; there is no per-project copy. That file is
 the only output committed to git, and it contains only rules and trimmed,
 scrubbed before/after snippets, never full threads. Rejected rules go to
 `rules/rejected.md` so they aren't proposed again.
@@ -437,7 +453,7 @@ packages.
 | Where | Cost | How it's kept down |
 |---|---|---|
 | Stages 1–2 | 0 | Plain scripts (D7). |
-| Stage 3, labeling | one-time, the largest | Filters first (5.1), short records (about 200–400 tokens each), batches of 20–50, cheapest Copilot model, nothing labeled twice, `--dry-run` estimate first. |
+| Stage 3, labeling | one-time, the largest | Filters first (5.1), short records (about 200–400 tokens each), batches of 20–50, cheapest model the AI command offers, nothing labeled twice, `--dry-run` estimate first. |
 | Stage 4, rules | one-time, small | Grouped by script first. AI sees one-line rules and 2 examples per group. One reconcile call over the rules list. |
 | Each review | recurring, the one that matters | Team rules under 2k tokens. At most 5 examples per checklist actually walked, at most 3 past threads per file in scope, all already trimmed. `projects/*/threads.jsonl` is never loaded in full. |
 
@@ -459,13 +475,11 @@ to compare measured usage with the estimate.
 
 ## 13. Open questions
 
-1. **The awesome-copilot GitLab client:** the user will give the repo. Its
-   patterns are to be read before writing `fetch_mrs.py`.
-2. **Copilot CLI:** the version installed, its non-interactive flags, and which
-   models are available for the cheap labeling pass.
-3. **Shared or per-project rules:** one `team-review-rules.md` for all
-   projects, or a shared file plus project-specific additions.
-4. **Name:** `muninn`, or another name.
+1. **Name:** `muninn`, or another name.
+
+Inputs given at development time, not open questions: the awesome-copilot repo
+whose GitLab client `fetch_mrs.py` is modeled on (D3), and the value of
+`AI_COMMAND` (D6).
 
 ## 14. Staged plan
 
