@@ -1,8 +1,10 @@
 # Design: review memory for `forseti`, learned from past GitLab merge requests
 
-Status: design only (revision 3). Nothing is implemented yet. Working name
-for the component: `muninn`, after the raven that flies over the world every
-day and brings back to Odin what it remembers. The name is open (section 13).
+Status: design only (revision 4). Nothing is implemented yet. The feature is
+called **review memory**: it is part of forseti, not a separate skill.
+
+Revision 4: the feature has a plain name, review memory, and its scripts live
+in `skills/forseti/scripts/review-memory/`. No open questions remain.
 
 Revision 3: the team rules are global: one shared file for all projects and
 services, never per project. The AI steps don't depend on a specific tool:
@@ -77,7 +79,7 @@ Out of scope:
 | 5. Approve | person | `rules/*.md` | `references/team-review-rules.md` |
 | Review time | forseti | diff + rules + memory folder | forseti report (section 10) |
 
-The scripts live in the skill: `skills/forseti/scripts/muninn/`. Every stage
+The scripts live in the skill: `skills/forseti/scripts/review-memory/`. Every stage
 reads the previous stage's files and can be rerun on its own.
 
 ## 4. Stage 1: fetch, in parallel
@@ -473,11 +475,9 @@ to compare measured usage with the estimate.
 - **Refresh:** rerun stages 1–4 on a schedule (for example monthly). Rules whose
   evidence stops growing are proposed for removal in `reconcile.md`.
 
-## 13. Open questions
+## 13. Inputs given at development time
 
-1. **Name:** `muninn`, or another name.
-
-Inputs given at development time, not open questions: the awesome-copilot repo
+None of these are open design questions: the awesome-copilot repo
 whose GitLab client `fetch_mrs.py` is modeled on (D3), and the value of
 `AI_COMMAND` (D6).
 
